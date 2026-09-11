@@ -38,9 +38,9 @@ async function handleUpdate(update) {
 
       // Maintenance mode
       const settings = await getBotSettings();
-      if (settings?.maintenanceMode) {
+      if (settings?.maintenance_mode) {
         const admin = await getAdmin();
-        if (!admin || admin.userId !== userId) {
+        if (!admin || admin.user_id !== userId) {
           await deleteMessage(chatId, msg.message_id);
           return sendMessage(chatId, '🔧 <b>Bot is under maintenance</b>\n\nPlease try again later.');
         }
@@ -79,7 +79,7 @@ async function handleUpdate(update) {
 
       if (text === '/help') {
         await deleteMessage(chatId, msg.message_id);
-        const { showHelp } = require('./user/help');
+        const { showHelp } = require('./user/language');
         return showHelp(chatId, userId);
       }
 
@@ -93,11 +93,7 @@ async function handleUpdate(update) {
         return handleSessionInput(msg, session);
       }
 
-      // Forwarded channel message (private channel detection)
-      if (msg.forward_from_chat?.type === 'channel') {
-        const { handleForwardedChannel } = require('./creator/onboarding');
-        return handleForwardedChannel(msg, session);
-      }
+      // Forwarded channel message with no active setup session — nothing to do
     }
   } catch (err) {
     console.error('Update handler error:', err);
@@ -139,7 +135,7 @@ async function handleChannelMember(update) {
         if (admin) {
           
           const channel = await d1First('SELECT channel_name FROM channels WHERE channel_id = ?', [chatId]);
-          await sendMessage(admin.userId,
+          await sendMessage(admin.user_id,
             `⚠️ <b>Member Left Channel!</b>\n━━━━━━━━━━━━━━━━━━\n` +
             `👤 <b>User ID:</b> <code>${userId}</code>\n` +
             `📢 <b>Channel:</b> ${channel?.channelName || chatId}`

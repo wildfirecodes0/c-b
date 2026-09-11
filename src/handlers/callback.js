@@ -23,7 +23,7 @@ async function handleCallback(cb) {
 
   // ---- ToS ----
   if (data === 'tos_accept') {
-    await updateUser(userId, { tosAccepted: true, tosAcceptedAt: Date.now() });
+    await updateUser(userId, { tos_accepted: true, tos_accepted_at: Date.now() });
     const { showMenu } = require('./user/start');
     return showMenu(chatId, userId, user);
   }
@@ -52,7 +52,6 @@ async function handleCallback(cb) {
     return showMembershipDetail(chatId, userId, data.replace('membership_detail_', ''), msgId);
   }
   if (data.startsWith('cancel_sub_')) {
-    const { Subscription } = require('../db/index');
     await require('../db/d1').d1Run("UPDATE subscriptions SET status='cancelled', updated_at=? WHERE id=?",[Date.now(),data.replace('cancel_sub_','')]);
     return editMessage(chatId, msgId, '✅ <b>Subscription Cancelled!</b>',
       { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'user_memberships')]]) });
@@ -207,7 +206,7 @@ async function handleCallback(cb) {
   }
   if (data === 'settings_toggle_notif') {
     const u = await getUser(userId);
-    await updateUser(userId, { notifyExpiry: !u.notifyExpiry });
+    await updateUser(userId, { notify_expiry: !u.notify_expiry });
     const { showCreatorSettings } = require('./creator/settings');
     return showCreatorSettings(chatId, userId, msgId);
   }
@@ -257,7 +256,7 @@ async function handleCallback(cb) {
   // ---- ADMIN CALLBACKS ----
   if (data === 'admin_menu') {
     const admin = await getAdmin();
-    if (!admin || admin.userId !== userId) return;
+    if (!admin || admin.user_id !== userId) return;
     const { showAdminMenu } = require('./admin/menu');
     return showAdminMenu(chatId, userId, msgId);
   }

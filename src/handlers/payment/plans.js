@@ -7,7 +7,7 @@ const { decrypt } = require('../../utils/crypto');
 // ---- SHOW CHANNEL PLANS ----
 async function showChannelPlans(chatId, userId, channelId, msgId = null) {
   const channel = await getChannel(channelId);
-  if (!channel || channel.isSuspended || !channel.isActive) {
+  if (!channel || channel.is_suspended || !channel.is_active) {
     const text = `❌ <b>Channel not available!</b>\n\nThis channel is not currently accepting subscriptions.`;
     if (msgId) return editMessage(chatId, msgId, text, { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'main_menu')]]) });
     return sendMessage(chatId, text);
@@ -15,7 +15,7 @@ async function showChannelPlans(chatId, userId, channelId, msgId = null) {
 
   const existing = await getSubscription(userId, channelId);
   if (existing) {
-    const text = `✅ <b>Already Subscribed!</b>\n\nYou already have an active subscription to <b>${channel.channelName}</b>.`;
+    const text = `✅ <b>Already Subscribed!</b>\n\nYou already have an active subscription to <b>${channel.channel_name}</b>.`;
     if (msgId) return editMessage(chatId, msgId, text, { reply_markup: inlineKeyboard([[cbButton('💎 My Memberships', 'user_memberships')], [cbButton('🔙 Back', 'main_menu')]]) });
     return sendMessage(chatId, text);
   }
@@ -27,24 +27,24 @@ async function showChannelPlans(chatId, userId, channelId, msgId = null) {
     return sendMessage(chatId, text);
   }
 
-  const trialPlan = plans.find(p => p.trialDays > 0);
+  const trialPlan = plans.find(p => p.trial_days > 0);
   const trialUsed = trialPlan ? await hasUsedTrial(userId, channelId) : true;
-  const channelDisplay = channel.username ? `@${channel.username}` : channel.channelName;
+  const channelDisplay = channel.username ? `@${channel.username}` : channel.channel_name;
 
-  let text = `<b>💎 ${channelDisplay} — Choose a Plan</b>\n━━━━━━━━━━━━━━━━━━\n👥 <b>Members:</b> ${channel.totalMembers}\n`;
+  let text = `<b>💎 ${channelDisplay} — Choose a Plan</b>\n━━━━━━━━━━━━━━━━━━\n👥 <b>Members:</b> ${channel.total_members}\n`;
   if (channel.category) text += `🏷 <b>Category:</b> ${channel.category}\n`;
   text += `━━━━━━━━━━━━━━━━━━\n`;
 
   const buttons = [];
   plans.forEach((plan, i) => {
-    const emoji = plan.planType === 'monthly' ? '📅' : plan.planType === 'yearly' ? '📆' : '♾️';
-    text += `\n${i + 1}️⃣ <b>${plan.planType.charAt(0).toUpperCase() + plan.planType.slice(1)}</b> — ₹${plan.price / 100}`;
-    if (plan.trialDays > 0 && !trialUsed) text += `\n🎁 <b>Free Trial:</b> ${plan.trialDays} Days`;
-    buttons.push([cbButton(`${emoji} ${plan.planType.charAt(0).toUpperCase() + plan.planType.slice(1)} — ₹${plan.price / 100}`, `select_plan_${plan._id}`)]);
+    const emoji = plan.plan_type === 'monthly' ? '📅' : plan.plan_type === 'yearly' ? '📆' : '♾️';
+    text += `\n${i + 1}️⃣ <b>${plan.plan_type.charAt(0).toUpperCase() + plan.plan_type.slice(1)}</b> — ₹${plan.price / 100}`;
+    if (plan.trial_days > 0 && !trialUsed) text += `\n🎁 <b>Free Trial:</b> ${plan.trial_days} Days`;
+    buttons.push([cbButton(`${emoji} ${plan.plan_type.charAt(0).toUpperCase() + plan.plan_type.slice(1)} — ₹${plan.price / 100}`, `select_plan_${plan.id}`)]);
   });
 
   if (!trialUsed && trialPlan) {
-    buttons.push([cbButton(`🎁 Free Trial — ${trialPlan.trialDays} Days`, `trial_${channelId}`)]);
+    buttons.push([cbButton(`🎁 Free Trial — ${trialPlan.trial_days} Days`, `trial_${channelId}`)]);
   }
   buttons.push([cbButton('🔙 Back', 'main_menu')]);
 
@@ -57,22 +57,22 @@ async function showPaymentMethods(chatId, userId, planId, msgId) {
   
   const plan = await require('../../db/d1').d1First('SELECT * FROM plans WHERE id=?',[planId]);
   if (!plan) return;
-  const channel = await getChannel(plan.channelId);
-  const creator = await getCreator(plan.creatorUserId);
-  const channelDisplay = channel?.username ? `@${channel.username}` : channel?.channelName;
-  const hasRazorpay = creator?.razorpayKey || creator?.useDefaultRazorpay;
-  const hasTrx = !!creator?.trxWallet;
+  const channel = await getChannel(plan.channel_id);
+  const creator = await getCreator(plan.creator_user_id);
+  const channelDisplay = channel?.username ? `@${channel.username}` : channel?.channel_name;
+  const hasRazorpay = creator?.razorpay_key || creator?.use_default_razorpay;
+  const hasTrx = !!creator?.trx_wallet;
 
   const text =
     `<b>💳 Complete Payment</b>\n━━━━━━━━━━━━━━━━━━\n` +
     `📢 <b>Channel:</b> ${channelDisplay}\n` +
-    `💎 <b>Plan:</b> ${plan.planType}\n` +
+    `💎 <b>Plan:</b> ${plan.plan_type}\n` +
     `💰 <b>Amount:</b> ₹${plan.price / 100}\n\nChoose payment method:`;
 
   const buttons = [];
   if (hasRazorpay) buttons.push([cbButton('💳 Pay via Razorpay', `pay_razorpay_${planId}`)]);
   if (hasTrx) buttons.push([cbButton('🪙 Pay via TRX (USDT)', `pay_trx_${planId}`)]);
-  buttons.push([cbButton('🔙 Back', `join_${plan.channelId}`)]);
+  buttons.push([cbButton('🔙 Back', `join_${plan.channel_id}`)]);
 
   return editMessage(chatId, msgId, text, { reply_markup: inlineKeyboard(buttons) });
 }
@@ -82,20 +82,20 @@ async function initRazorpayPayment(chatId, userId, planId, msgId) {
   
   const plan = await require('../../db/d1').d1First('SELECT * FROM plans WHERE id=?',[planId]);
   if (!plan) return;
-  const channel = await getChannel(plan.channelId);
-  const creator = await getCreator(plan.creatorUserId);
+  const channel = await getChannel(plan.channel_id);
+  const creator = await getCreator(plan.creator_user_id);
 
   let razorpayKey, razorpaySecret;
-  if (creator?.useDefaultRazorpay || !creator?.razorpayKey) {
+  if (creator?.use_default_razorpay || !creator?.razorpay_key) {
     razorpayKey = process.env.RAZORPAY_KEY;
     razorpaySecret = process.env.RAZORPAY_SECRET;
   } else {
-    razorpayKey = decrypt(creator.razorpayKey);
-    razorpaySecret = decrypt(creator.razorpaySecret);
+    razorpayKey = decrypt(creator.razorpay_key);
+    razorpaySecret = decrypt(creator.razorpay_secret);
   }
 
   const sessionId = generateToken(16);
-  const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+  const expiresAt = Date.now() + 5 * 60 * 1000;
 
   // Create Razorpay payment link
   let linkRes;
@@ -110,16 +110,16 @@ async function initRazorpayPayment(chatId, userId, planId, msgId) {
       body: JSON.stringify({
         amount: plan.price,
         currency: 'INR',
-        description: `${channel?.channelName} — ${plan.planType} Plan`,
-        expire_by: Math.floor(expiresAt.getTime() / 1000),
+        description: `${channel?.channel_name} — ${plan.plan_type} Plan`,
+        expire_by: Math.floor(expiresAt / 1000),
         reminder_enable: false,
         notify: { sms: false, email: false },
         notes: {
           session_id: sessionId,
-          creator_id: String(plan.creatorUserId),
+          creator_id: String(plan.creator_user_id),
           user_id: String(userId),
           plan_id: String(planId),
-          channel_id: String(plan.channelId),
+          channel_id: String(plan.channel_id),
         },
       }),
     });
@@ -138,20 +138,20 @@ async function initRazorpayPayment(chatId, userId, planId, msgId) {
   // Save payment session
   await createPaymentSession({
     sessionId, userId,
-    channelId: plan.channelId,
-    planId: plan._id,
-    creatorUserId: plan.creatorUserId,
+    channelId: plan.channel_id,
+    planId: plan.id,
+    creatorUserId: plan.creator_user_id,
     amount: plan.price,
     method: 'razorpay',
     razorpayLinkId: linkRes.id,
     expiresAt,
   });
 
-  const channelDisplay = channel?.username ? `@${channel.username}` : channel?.channelName;
+  const channelDisplay = channel?.username ? `@${channel.username}` : channel?.channel_name;
   return editMessage(chatId, msgId,
     `<b>💳 Complete Payment</b>\n━━━━━━━━━━━━━━━━━━\n` +
     `📢 <b>Channel:</b> ${channelDisplay}\n` +
-    `💎 <b>Plan:</b> ${plan.planType}\n` +
+    `💎 <b>Plan:</b> ${plan.plan_type}\n` +
     `💰 <b>Amount:</b> ₹${plan.price / 100}\n\n` +
     `⏰ <b>Time Remaining:</b> 05:00\n\n` +
     `⚡ <i>Payment will be detected automatically after completion!</i>`,
@@ -169,10 +169,10 @@ async function initTrxPayment(chatId, userId, planId, msgId) {
   
   const plan = await require('../../db/d1').d1First('SELECT * FROM plans WHERE id=?',[planId]);
   if (!plan) return;
-  const channel = await getChannel(plan.channelId);
-  const creator = await getCreator(plan.creatorUserId);
+  const channel = await getChannel(plan.channel_id);
+  const creator = await getCreator(plan.creator_user_id);
 
-  if (!creator?.trxWallet) {
+  if (!creator?.trx_wallet) {
     return editMessage(chatId, msgId, `❌ <b>TRX not available!</b>`,
       { reply_markup: inlineKeyboard([[cbButton('🔙 Back', `select_plan_${planId}`)]]) });
   }
@@ -180,26 +180,26 @@ async function initTrxPayment(chatId, userId, planId, msgId) {
   const usdtRate = await getUSDTRate();
   const amountUsdt = (plan.price / 100 / usdtRate).toFixed(2);
   const sessionId = generateToken(16);
-  const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+  const expiresAt = Date.now() + 5 * 60 * 1000;
 
   await createPaymentSession({
     sessionId, userId,
-    channelId: plan.channelId,
-    planId: plan._id,
-    creatorUserId: plan.creatorUserId,
+    channelId: plan.channel_id,
+    planId: plan.id,
+    creatorUserId: plan.creator_user_id,
     amount: plan.price,
     method: 'trx',
-    trxWallet: creator.trxWallet,
+    trxWallet: creator.trx_wallet,
     trxAmountUsdt: parseFloat(amountUsdt),
     expiresAt,
   });
 
-  const channelDisplay = channel?.username ? `@${channel.username}` : channel?.channelName;
+  const channelDisplay = channel?.username ? `@${channel.username}` : channel?.channel_name;
   return editMessage(chatId, msgId,
     `<b>🪙 TRX Payment</b>\n━━━━━━━━━━━━━━━━━━\n` +
     `📢 <b>Channel:</b> ${channelDisplay}\n` +
     `💰 <b>Amount:</b> <code>${amountUsdt} USDT</code> (TRC20)\n\n` +
-    `Send USDT to this address:\n<code>${creator.trxWallet}</code>\n\n` +
+    `Send USDT to this address:\n<code>${creator.trx_wallet}</code>\n\n` +
     `⏰ <b>Time Remaining:</b> 05:00\n\n` +
     `⏳ <i>Payment will be auto-detected within 30 seconds after confirmation!</i>\n\n` +
     `⚠️ <i>Send exact amount only.</i>`,
@@ -210,14 +210,14 @@ async function initTrxPayment(chatId, userId, planId, msgId) {
 // ---- FREE TRIAL ----
 async function startTrial(chatId, userId, channelId, msgId = null) {
   const channel = await getChannel(channelId);
-  if (!channel || channel.isSuspended) {
+  if (!channel || channel.is_suspended) {
     const text = `❌ <b>Channel not available!</b>`;
     if (msgId) return editMessage(chatId, msgId, text, { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'main_menu')]]) });
     return sendMessage(chatId, text);
   }
 
   const plans = await getChannelPlans(channelId);
-  const trialPlan = plans.find(p => p.trialDays > 0);
+  const trialPlan = plans.find(p => p.trial_days > 0);
   if (!trialPlan) return sendMessage(chatId, `❌ No trial available for this channel.`);
 
   const used = await hasUsedTrial(userId, channelId);
@@ -227,17 +227,17 @@ async function startTrial(chatId, userId, channelId, msgId = null) {
   }
 
   const now = Date.now();
-  const expiresAt = new Date(now + trialPlan.trialDays * 24 * 60 * 60 * 1000);
+  const expiresAt = now + trialPlan.trial_days * 24 * 60 * 60 * 1000;
 
   const { markTrialUsed, createSubscription } = require('../../db/index');
   await markTrialUsed(userId, channelId, expiresAt);
   await createSubscription({
-    userId, channelId, planId: trialPlan._id,
-    creatorUserId: trialPlan.creatorUserId,
+    userId, channelId, planId: trialPlan.id,
+    creatorUserId: trialPlan.creator_user_id,
     isTrial: true,
-    activatedAt: Date.now(),
+    activatedAt: now,
     expiresAt,
-    graceUntil: new Date(expiresAt.getTime() + 24 * 60 * 60 * 1000),
+    graceUntil: expiresAt + 24 * 60 * 60 * 1000,
   });
 
   const inviteResult = await createInviteLink(channelId, 300);
@@ -245,8 +245,8 @@ async function startTrial(chatId, userId, channelId, msgId = null) {
 
   const text =
     `🎁 <b>Free Trial Activated!</b>\n━━━━━━━━━━━━━━━━━━\n` +
-    `📢 <b>Channel:</b> ${channel.channelName}\n` +
-    `⏰ <b>Trial Duration:</b> ${trialPlan.trialDays} days\n` +
+    `📢 <b>Channel:</b> ${channel.channel_name}\n` +
+    `⏰ <b>Trial Duration:</b> ${trialPlan.trial_days} days\n` +
     `💥 <b>Expires:</b> ${formatDate(expiresAt)}\n\n` +
     `🔗 <b>Your Join Link:</b>\n<code>${inviteLink}</code>\n\n` +
     `⚠️ <i>This link will expire in 5 minutes and can only be used once!</i>`;
