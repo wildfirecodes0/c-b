@@ -1,0 +1,25 @@
+{
+  "name": "crevio-bot",
+  "version": "1.0.0",
+  "description": "Crevio — Telegram Membership SaaS Bot (Render + Cloudflare D1)",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "webhook:set": "node scripts/set-webhook.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "node-fetch": "^2.7.0",
+    "node-cron": "^3.0.3",
+    "crypto-js": "^4.2.0",
+    "form-data": "^4.0.0",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
