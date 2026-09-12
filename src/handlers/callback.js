@@ -24,8 +24,10 @@ async function handleCallback(cb) {
   // ---- ToS ----
   if (data === 'tos_accept') {
     await updateUser(userId, { tos_accepted: true, tos_accepted_at: Date.now() });
-    const { showMenu } = require('./user/start');
-    return showMenu(chatId, userId, user);
+    await editMessage(chatId, msgId, `✨ <b>Congratulations!</b>\n\nYou've successfully accepted our Terms of Service.`);
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    const { promptChannelJoinAfterTos } = require('./user/start');
+    return promptChannelJoinAfterTos(chatId, msgId, userId);
   }
   if (data === 'tos_decline') {
     return editMessage(chatId, msgId, '❌ You must accept the Terms of Service to use Crevio Bot.');
@@ -84,6 +86,12 @@ async function handleCallback(cb) {
     const { showFAQ } = require('./user/menu');
     return showFAQ(chatId, userId, msgId);
   }
+  if (data === 'support_raise_ticket') {
+    await setUserSession(userId, 'support_ticket_subject', {}, msgId);
+    return editMessage(chatId, msgId,
+      `<b>🎫 Raise a Support Ticket</b>\n━━━━━━━━━━━━━━━━━━\n✏️ <b>Enter a short subject for your issue:</b>`,
+      { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'user_support')]]) });
+  }
   if (data === 'user_become_creator') {
     const { showBecomeCreator } = require('./creator/onboarding');
     return showBecomeCreator(chatId, userId, msgId);
@@ -99,22 +107,41 @@ async function handleCallback(cb) {
     return showGatewaySetup(chatId, userId, msgId);
   }
   if (data === 'gateway_own_razorpay') {
-    await setUserSession(userId, 'creator_enter_razorpay_key', {}, msgId);
+    const session = await require('../db/index').getUserSession(userId);
+    await setUserSession(userId, 'creator_setup_razorpay_key', { ...session?.data }, msgId);
     return editMessage(chatId, msgId,
       `<b>🔑 Enter Razorpay Key ID:</b>\n📌 <i>Example: rzp_live_xxxxx</i>`,
       { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'creator_setup_gateway')]]) });
   }
   if (data === 'gateway_trx') {
-    await setUserSession(userId, 'creator_enter_trx_wallet', {}, msgId);
+    const session = await require('../db/index').getUserSession(userId);
+    await setUserSession(userId, 'creator_setup_trx_wallet', { ...session?.data }, msgId);
     return editMessage(chatId, msgId,
       `<b>🪙 Enter Your TRX Wallet Address:</b>\n📌 <i>Example: TRxxxxxxxxxxxxxxxxxx</i>`,
       { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'creator_setup_gateway')]]) });
   }
   if (data === 'gateway_default_razorpay') {
-    
     await require('../db/d1').d1Run('UPDATE creators SET use_default_razorpay=1, updated_at=? WHERE user_id=?',[Date.now(),userId]);
+    const session = await require('../db/index').getUserSession(userId);
     const { showPlanSetup } = require('./creator/onboarding');
-    return showPlanSetup(chatId, userId, msgId);
+    return showPlanSetup(chatId, userId, msgId, session?.data?.channelId);
+  }
+  if (data === 'creator_setup_plan') {
+    const session = await require('../db/index').getUserSession(userId);
+    const { showPlanSetup } = require('./creator/onboarding');
+    return showPlanSetup(chatId, userId, msgId, session?.data?.channelId);
+  }
+  if (data === 'creator_setup_fee') {
+    const { showPlatformFeePayment } = require('./creator/onboarding');
+    return showPlatformFeePayment(chatId, userId, msgId);
+  }
+  if (data === 'fee_pay_razorpay') {
+    const { initPlatformFeePayment } = require('./creator/onboarding');
+    return initPlatformFeePayment(chatId, userId, msgId, 'razorpay');
+  }
+  if (data === 'fee_pay_trx') {
+    const { initPlatformFeePayment } = require('./creator/onboarding');
+    return initPlatformFeePayment(chatId, userId, msgId, 'trx');
   }
   if (data.startsWith('plan_type_')) {
     const planType = data.replace('plan_type_', '');
@@ -143,6 +170,34 @@ async function handleCallback(cb) {
     const { showCreatorChannelDetail } = require('./creator/channels');
     return showCreatorChannelDetail(chatId, userId, parseInt(data.replace('creator_channel_detail_', '')), msgId);
   }
+  if (data.startsWith('edit_channel_')) {
+    const { showEditChannel } = require('./creator/channels');
+    return showEditChannel(chatId, userId, parseInt(data.replace('edit_channel_', '')), msgId);
+  }
+  if (data.startsWith('toggle_pause_channel_')) {
+    const { togglePauseChannel } = require('./creator/channels');
+    return togglePauseChannel(chatId, userId, parseInt(data.replace('toggle_pause_channel_', '')), msgId);
+  }
+  if (data.startsWith('delete_channel_confirm_')) {
+    const { deleteChannel } = require('./creator/channels');
+    return deleteChannel(chatId, userId, parseInt(data.replace('delete_channel_confirm_', '')), msgId);
+  }
+  if (data.startsWith('delete_channel_')) {
+    const { confirmDeleteChannel } = require('./creator/channels');
+    return confirmDeleteChannel(chatId, userId, parseInt(data.replace('delete_channel_', '')), msgId);
+  }
+  if (data.startsWith('renew_fee_razorpay_')) {
+    const { initFeeRenewal } = require('./creator/onboarding');
+    return initFeeRenewal(chatId, userId, parseInt(data.replace('renew_fee_razorpay_', '')), msgId, 'razorpay');
+  }
+  if (data.startsWith('renew_fee_trx_')) {
+    const { initFeeRenewal } = require('./creator/onboarding');
+    return initFeeRenewal(chatId, userId, parseInt(data.replace('renew_fee_trx_', '')), msgId, 'trx');
+  }
+  if (data.startsWith('renew_fee_')) {
+    const { showFeeRenewal } = require('./creator/onboarding');
+    return showFeeRenewal(chatId, userId, parseInt(data.replace('renew_fee_', '')), msgId);
+  }
   if (data === 'creator_plans' || data.startsWith('creator_plans_page_')) {
     const page = data.startsWith('creator_plans_page_') ? parseInt(data.split('_').pop()) : 1;
     const { showCreatorPlans } = require('./creator/plans');
@@ -151,6 +206,14 @@ async function handleCallback(cb) {
   if (data === 'add_plan_select_channel') {
     const { showAddPlanChannelSelect } = require('./creator/plans');
     return showAddPlanChannelSelect(chatId, userId, msgId);
+  }
+  if (data.startsWith('plan_detail_')) {
+    const { showPlanDetail } = require('./creator/plans');
+    return showPlanDetail(chatId, userId, parseInt(data.replace('plan_detail_', '')), msgId);
+  }
+  if (data.startsWith('toggle_plan_active_')) {
+    const { togglePlanActive } = require('./creator/plans');
+    return togglePlanActive(chatId, userId, parseInt(data.replace('toggle_plan_active_', '')), msgId);
   }
   if (data.startsWith('add_plan_channel_')) {
     const channelId = parseInt(data.replace('add_plan_channel_', ''));
@@ -274,8 +337,8 @@ async function handleCallback(cb) {
     return showAdminCreatorDetail(chatId, userId, parseInt(data.replace('admin_creator_detail_', '')), msgId);
   }
   if (data.startsWith('admin_verify_creator_')) {
-    
-    await Creator.findOneAndUpdate({ userId: parseInt(data.replace('admin_verify_creator_', '')) }, { isVerified: true, verifiedAt: Date.now() });
+    const creatorUserId = parseInt(data.replace('admin_verify_creator_', ''));
+    await require('../db/d1').d1Run('UPDATE creators SET is_verified=1, verified_at=? WHERE user_id=?', [Date.now(), creatorUserId]);
     return editMessage(chatId, msgId, '✅ <b>Creator Verified!</b>', { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'admin_creators')]]) });
   }
   if (data.startsWith('admin_suspend_creator_')) {
@@ -314,18 +377,22 @@ async function handleCallback(cb) {
   }
   if (data.startsWith('admin_suspend_channel_')) {
     const channelId = parseInt(data.replace('admin_suspend_channel_', ''));
-    await require('../db/index').Channel.findOneAndUpdate({ channelId }, { isSuspended: true, isActive: false });
+    await require('../db/d1').d1Run('UPDATE channels SET is_suspended=1, is_active=0, updated_at=? WHERE channel_id=?', [Date.now(), channelId]);
     return editMessage(chatId, msgId, '🚫 <b>Channel Suspended!</b>', { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'admin_channels')]]) });
   }
   if (data.startsWith('admin_activate_channel_')) {
     const channelId = parseInt(data.replace('admin_activate_channel_', ''));
-    await require('../db/index').Channel.findOneAndUpdate({ channelId }, { isSuspended: false, isActive: true });
+    await require('../db/d1').d1Run('UPDATE channels SET is_suspended=0, is_active=1, updated_at=? WHERE channel_id=?', [Date.now(), channelId]);
     return editMessage(chatId, msgId, '✅ <b>Channel Activated!</b>', { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'admin_channels')]]) });
   }
   if (data === 'admin_transactions' || data.startsWith('admin_transactions_page_')) {
     const page = data.startsWith('admin_transactions_page_') ? parseInt(data.split('_').pop()) : 1;
     const { showAdminTransactions } = require('./admin/transactions');
     return showAdminTransactions(chatId, userId, page, msgId);
+  }
+  if (data === 'admin_txn_pdf') {
+    const { downloadAdminTransactionsPDF } = require('./admin/transactions');
+    return downloadAdminTransactionsPDF(chatId, userId);
   }
   if (data.startsWith('admin_txn_detail_')) {
     const { showAdminTxnDetail } = require('./admin/transactions');
@@ -342,6 +409,14 @@ async function handleCallback(cb) {
   if (data === 'admin_settings') {
     const { showAdminSettings } = require('./admin/settings');
     return showAdminSettings(chatId, userId, msgId);
+  }
+  if (data === 'admin_change_fee') {
+    await setUserSession(userId, 'admin_change_fee', {}, msgId);
+    return editMessage(chatId, msgId, `<b>💰 Enter New Platform Fee (₹):</b>\n📌 <i>Example: 49</i>`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'admin_settings')]]) });
+  }
+  if (data === 'admin_change_commission') {
+    await setUserSession(userId, 'admin_change_commission', {}, msgId);
+    return editMessage(chatId, msgId, `<b>📊 Enter New Commission %:</b>\n📌 <i>Example: 5</i>`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'admin_settings')]]) });
   }
   if (data === 'admin_toggle_maintenance') {
     const { toggleMaintenance } = require('./admin/settings');

@@ -137,8 +137,8 @@ async function showReferEarn(chatId, userId, msgId) {
 
 async function showSupport(chatId, userId, msgId) {
   return editMessage(chatId, msgId,
-    `<b>❓ Support & Help</b>\n━━━━━━━━━━━━━━━━━━\nHow can we help you today?\n\n💬 <i>Chat with our support team</i>\n📖 <i>Browse FAQs</i>`,
-    { reply_markup: inlineKeyboard([[urlButton('💬 Chat Support', 'https://t.me/RaushanKakhaura'), cbButton('📖 FAQ', 'support_faq')], [cbButton('🔙 Back', 'main_menu')]]) }
+    `<b>❓ Support & Help</b>\n━━━━━━━━━━━━━━━━━━\nHow can we help you today?\n\n💬 <i>Chat with our support team</i>\n🎫 <i>Raise a support ticket</i>\n📖 <i>Browse FAQs</i>`,
+    { reply_markup: inlineKeyboard([[urlButton('💬 Chat Support', 'https://t.me/RaushanKakhaura'), cbButton('🎫 Raise a Ticket', 'support_raise_ticket')], [cbButton('📖 FAQ', 'support_faq')], [cbButton('🔙 Back', 'main_menu')]]) }
   );
 }
 

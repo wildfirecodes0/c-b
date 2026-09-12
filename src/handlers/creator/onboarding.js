@@ -1,21 +1,24 @@
-const { getCreator, createCreator, setUserSession, getUserSession, clearUserSession, updateUser, createChannel, createPlan, getAdmin } = require('../../db/index');
+'use strict';
+const { getCreator, createCreator, setUserSession, getUserSession, clearUserSession, updateUser, createPlan, getBotSettings } = require('../../db/index');
+const { d1First, d1Run } = require('../../db/d1');
 const { editMessage, sendMessage, inlineKeyboard, cbButton, urlButton, getBotPermissions, getChat, getChatMemberCount } = require('../../utils/telegram');
-const { encrypt, formatDate } = require('../../utils/crypto');
-const { notifyAdmin } = require('../user/start');
+const { encrypt, generateToken } = require('../../utils/crypto');
 
 async function showBecomeCreator(chatId, userId, msgId) {
   const creator = await getCreator(userId);
-  if (creator?.onboardingComplete) {
+  if (creator?.onboarding_complete) {
     const { showCreatorMenu } = require('./menu');
     return showCreatorMenu(chatId, userId, msgId);
   }
+  const settings = await getBotSettings();
+  const fee = (settings?.platform_fee || 4900) / 100;
   return editMessage(chatId, msgId,
     `<b>🚀 Become a Creator</b>\n━━━━━━━━━━━━━━━━━━\n` +
     `Monetize your Telegram channel in just a few steps!\n\n` +
     `✅ <i>Accept global payments</i>\n` +
     `✅ <i>Auto manage members</i>\n` +
     `✅ <i>Dashboard & analytics</i>\n\n` +
-    `💰 <b>Platform Fee:</b> <i>₹49 Only Per Channel</i>\n` +
+    `💰 <b>Platform Fee:</b> <i>₹${fee} Only Per Channel</i>\n` +
     `🚸 <b>Note:</b> If You Use Your Own Razorpay Key & Secret ID For Payment Then It's Cost Free. If You Want To Use Default Razorpay Key & Secret ID Then It's Will Be Take 5% Charge And Payment Got Settled In 3 Days.`,
     { reply_markup: inlineKeyboard([[cbButton('✅ Start Setup', 'creator_start_setup')], [cbButton('🔙 Back', 'main_menu')]]) }
   );
@@ -77,8 +80,7 @@ async function handleChannelInput(msg, session) {
   }
 
   // Check not already registered
-  
-  const existing = await require('../../db/d1').d1First('SELECT id FROM channels WHERE channel_id=?',[channelId]);
+  const existing = await d1First('SELECT id FROM channels WHERE channel_id=?', [channelId]);
   if (existing) {
     return editMessage(chatId, msgId,
       `❌ <b>Channel already registered!</b>`,
@@ -118,7 +120,7 @@ async function showGatewaySetup(chatId, userId, msgId) {
 
 async function showPlanSetup(chatId, userId, msgId, channelId = null) {
   const session = await getUserSession(userId);
-  if (channelId) await setUserSession(userId, 'creator_setup_plan', { ...session?.data, channelId }, msgId);
+  await setUserSession(userId, 'creator_setup_plan', { ...session?.data, channelId: channelId || session?.data?.channelId }, msgId);
   return editMessage(chatId, msgId,
     `<b>💎 Step 3/4 — Create Your First Plan</b>\n━━━━━━━━━━━━━━━━━━\nSelect plan type:`,
     { reply_markup: inlineKeyboard([
@@ -130,8 +132,10 @@ async function showPlanSetup(chatId, userId, msgId, channelId = null) {
 }
 
 async function showPlatformFeePayment(chatId, userId, msgId) {
+  const settings = await getBotSettings();
+  const fee = (settings?.platform_fee || 4900) / 100;
   return editMessage(chatId, msgId,
-    `<b>💰 Step 4/4 — Platform Fee</b>\n━━━━━━━━━━━━━━━━━━\n💰 <b>One Time Fee:</b> ₹49 per channel\n\nPay via:`,
+    `<b>💰 Step 4/4 — Platform Fee</b>\n━━━━━━━━━━━━━━━━━━\n💰 <b>One Time Fee:</b> ₹${fee} per channel\n\nPay via:`,
     { reply_markup: inlineKeyboard([
       [cbButton('💳 Pay via Razorpay', 'fee_pay_razorpay')],
       [cbButton('🪙 Pay via TRX', 'fee_pay_trx')],
@@ -140,63 +144,172 @@ async function showPlatformFeePayment(chatId, userId, msgId) {
   );
 }
 
-async function completeCreatorSetup(userId, channelData, planData) {
-  const now = Date.now();
-  await createChannel({
-    channelId: channelData.channelId, channelName: channelData.channelName,
-    username: channelData.channelUsername, creatorUserId: userId,
-    type: channelData.channelType,
-    platformFeePaid: true, platformFeeExpiresAt: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
-  });
-  await createPlan({
-    channelId: channelData.channelId, creatorUserId: userId,
-    planName: `${planData.type?.charAt(0).toUpperCase() + planData.type?.slice(1)} Plan`,
-    planType: planData.type, price: planData.price * 100, trialDays: planData.trialDays || 0,
-  });
-  
-  
-  await updateUser(userId, { role: 'creator' });
+// Creates the (dormant) channel + plan rows, then generates a platform-fee
+// payment (Razorpay link or TRX address). The channel stays inactive
+// (invisible to subscribers) until the fee payment is confirmed —
+// see completePlatformFeePayment() in razorpay-webhook.js.
+async function initPlatformFeePayment(chatId, userId, msgId, method) {
+  const session = await getUserSession(userId);
+  const data = session?.data;
+  if (!data?.channelId || !data?.planType || !data?.price) {
+    return editMessage(chatId, msgId, `❌ <b>Session expired.</b> Please start again.`,
+      { reply_markup: inlineKeyboard([[cbButton('🔙 Start Over', 'user_become_creator')]]) });
+  }
 
-  const joinLink = `https://t.me/${process.env.BOT_USERNAME}?start=join_${channelData.channelId}`;
-  await sendMessage(userId,
-    `<b>🎉 Congratulations!</b>\n━━━━━━━━━━━━━━━━━━\nYour channel is now live on Crevio!\n\n` +
-    `📢 <b>Channel:</b> ${channelData.channelName}\n` +
-    `💎 <b>Plan:</b> ${planData.type} — ₹${planData.price}\n\n` +
-    `🔗 <b>Your Payment Link:</b>\n<code>${joinLink}</code>\n\nShare this link with your audience!`,
-    { reply_markup: inlineKeyboard([[cbButton('📊 Go to Dashboard', 'creator_dashboard')]]) }
+  const settings = await getBotSettings();
+  const feeAmount = settings?.platform_fee || 4900; // paise
+
+  let channel = await d1First('SELECT * FROM channels WHERE channel_id=?', [data.channelId]);
+  if (!channel) {
+    await d1Run(
+      `INSERT INTO channels (channel_id, channel_name, username, creator_user_id, type, platform_fee_paid, is_active, created_at, updated_at)
+       VALUES (?,?,?,?,?,0,0,?,?)`,
+      [data.channelId, data.channelName, data.channelUsername || null, userId, data.channelType, Date.now(), Date.now()]
+    );
+    channel = await d1First('SELECT * FROM channels WHERE channel_id=?', [data.channelId]);
+  }
+
+  let plan = await d1First(
+    'SELECT * FROM plans WHERE channel_id=? AND creator_user_id=? AND plan_type=? ORDER BY id DESC LIMIT 1',
+    [data.channelId, userId, data.planType]
   );
+  if (!plan) {
+    const planName = `${data.planType.charAt(0).toUpperCase() + data.planType.slice(1)} Plan`;
+    await createPlan({
+      channelId: data.channelId, creatorUserId: userId,
+      planName, planType: data.planType, price: data.price * 100, trialDays: data.trialDays || 0,
+    });
+    plan = await d1First(
+      'SELECT * FROM plans WHERE channel_id=? AND creator_user_id=? AND plan_type=? ORDER BY id DESC LIMIT 1',
+      [data.channelId, userId, data.planType]
+    );
+  }
 
-  const user = await require('../../db/index').getUser(userId);
-  await notifyAdmin('new_creator', {
-    fullName: user.fullName, userId, channelName: channelData.channelName,
-    gateway: channelData.gateway || 'Own Razorpay',
+  const sessionId = generateToken(16);
+  const expiresAt = Date.now() + 15 * 60 * 1000; // 15 min window for the fee itself
+
+  return createFeePaymentSession(chatId, userId, msgId, {
+    channelId: data.channelId, channelName: data.channelName, planId: plan.id,
+    feeAmount, sessionId, expiresAt, method, backCbData: 'creator_setup_fee',
   });
 }
 
-module.exports = { showBecomeCreator, startCreatorSetup, handleChannelInput, showGatewaySetup, showPlanSetup, showPlatformFeePayment, completeCreatorSetup };
+// Shared by both first-time onboarding and later renewals — generates the
+// actual Razorpay link or TRX address for a ₹fee platform-fee payment.
+async function createFeePaymentSession(chatId, userId, msgId, opts) {
+  const { channelId, channelName, planId, feeAmount, sessionId, expiresAt, method, backCbData } = opts;
+  const { createPaymentSession } = require('../../db/index');
 
-// D1 fix patch
-const _d1 = require('../../db/d1');
-const _origCompleteSetup = completeCreatorSetup;
-async function completeCreatorSetup_fixed(userId, channelData, planData) {
-  const now = Date.now();
-  await _d1.d1Run(
-    'INSERT OR IGNORE INTO channels (channel_id, channel_name, username, creator_user_id, type, platform_fee_paid, platform_fee_expires_at, created_at, updated_at) VALUES (?,?,?,?,?,1,?,?,?)',
-    [channelData.channelId, channelData.channelName, channelData.channelUsername||null, userId, channelData.channelType, now.getTime()+30*24*60*60*1000, now.getTime(), now.getTime()]
-  );
-  const { createPlan, updateUser } = require('../../db/index');
-  await createPlan({ channelId:channelData.channelId, creatorUserId:userId, planName:`${planData.type?.charAt(0).toUpperCase()+planData.type?.slice(1)} Plan`, planType:planData.type, price:planData.price*100, trialDays:planData.trialDays||0 });
-  await _d1.d1Run('UPDATE creators SET onboarding_complete=1, updated_at=? WHERE user_id=?',[now.getTime(),userId]);
-  await updateUser(userId,{role:'creator'});
-  const { sendMessage, inlineKeyboard, cbButton } = require('../../utils/telegram');
-  const joinLink = `https://t.me/${process.env.BOT_USERNAME}?start=join_${channelData.channelId}`;
-  await sendMessage(userId,
-    `<b>🎉 Congratulations!</b>\n━━━━━━━━━━━━━━━━━━\nYour channel is now live on Crevio!\n\n📢 <b>Channel:</b> ${channelData.channelName}\n💎 <b>Plan:</b> ${planData.type} — ₹${planData.price}\n\n🔗 <b>Your Payment Link:</b>\n<code>${joinLink}</code>\n\nShare this link with your audience!`,
-    { reply_markup: inlineKeyboard([[cbButton('📊 Go to Dashboard','creator_dashboard')]]) }
-  );
-  const { notifyAdmin } = require('../user/start');
-  const { getUser } = require('../../db/index');
-  const user = await getUser(userId);
-  await notifyAdmin('new_creator',{ fullName:user.full_name, userId, channelName:channelData.channelName, gateway:channelData.gateway||'Own Razorpay' });
+  if (method === 'razorpay') {
+    let linkRes;
+    try {
+      const fetch = require('node-fetch');
+      const res = await fetch('https://api.razorpay.com/v1/payment_links', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Basic ' + Buffer.from(`${process.env.RAZORPAY_KEY}:${process.env.RAZORPAY_SECRET}`).toString('base64'),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          amount: feeAmount,
+          currency: 'INR',
+          description: `Crevio Platform Fee — ${channelName}`,
+          expire_by: Math.floor(expiresAt / 1000),
+          reminder_enable: false,
+          notify: { sms: false, email: false },
+          notes: { session_id: sessionId, purpose: 'platform_fee', channel_id: String(channelId) },
+        }),
+      });
+      linkRes = await res.json();
+    } catch (err) {
+      console.error('Platform fee Razorpay link error:', err);
+      return editMessage(chatId, msgId, `❌ <b>Payment link creation failed!</b>\n\nPlease try again.`,
+        { reply_markup: inlineKeyboard([[cbButton('🔙 Back', backCbData)]]) });
+    }
+    if (!linkRes?.id) {
+      return editMessage(chatId, msgId, `❌ <b>Payment link creation failed!</b>\n\nPlease try again.`,
+        { reply_markup: inlineKeyboard([[cbButton('🔙 Back', backCbData)]]) });
+    }
+
+    await createPaymentSession({
+      sessionId, userId, channelId, planId, creatorUserId: userId,
+      amount: feeAmount, method: 'razorpay', razorpayLinkId: linkRes.id, expiresAt,
+    });
+
+    return editMessage(chatId, msgId,
+      `<b>💳 Complete Platform Fee Payment</b>\n━━━━━━━━━━━━━━━━━━\n` +
+      `📢 <b>Channel:</b> ${channelName}\n💰 <b>Amount:</b> ₹${feeAmount / 100}\n\n` +
+      `⏰ <b>Time Remaining:</b> 15:00\n\n` +
+      `⚡ <i>Your channel goes live automatically once payment is confirmed!</i>`,
+      { reply_markup: inlineKeyboard([[urlButton('💳 Pay Now', linkRes.short_url)], [cbButton('🔙 Back', backCbData)]]) }
+    );
+  }
+
+  if (method === 'trx') {
+    const platformWallet = process.env.PLATFORM_TRX_WALLET;
+    if (!platformWallet) {
+      return editMessage(chatId, msgId, `❌ <b>TRX payment is not available right now.</b>`,
+        { reply_markup: inlineKeyboard([[cbButton('🔙 Back', backCbData)]]) });
+    }
+    const { getUSDTRate } = require('../../db/index');
+    const usdtRate = await getUSDTRate();
+    const amountUsdt = (feeAmount / 100 / usdtRate).toFixed(2);
+
+    await createPaymentSession({
+      sessionId, userId, channelId, planId, creatorUserId: userId,
+      amount: feeAmount, method: 'trx', trxWallet: platformWallet, trxAmountUsdt: parseFloat(amountUsdt), expiresAt,
+    });
+
+    return editMessage(chatId, msgId,
+      `<b>🪙 TRX Platform Fee Payment</b>\n━━━━━━━━━━━━━━━━━━\n` +
+      `📢 <b>Channel:</b> ${channelName}\n` +
+      `💰 <b>Amount:</b> <code>${amountUsdt} USDT</code> (TRC20)\n\n` +
+      `Send USDT to this address:\n<code>${platformWallet}</code>\n\n` +
+      `⏰ <b>Time Remaining:</b> 15:00\n\n` +
+      `⏳ <i>Payment will be auto-detected within 30 seconds after confirmation!</i>\n\n` +
+      `⚠️ <i>Send exact amount only.</i>`,
+      { reply_markup: inlineKeyboard([[cbButton('🔙 Back', backCbData)]]) }
+    );
+  }
 }
-module.exports.completeCreatorSetup = completeCreatorSetup_fixed;
+
+// ---- FEE RENEWAL (for an already-onboarded channel whose fee is expiring/expired) ----
+async function showFeeRenewal(chatId, userId, channelId, msgId) {
+  const ch = await d1First('SELECT * FROM channels WHERE channel_id = ? AND creator_user_id = ?', [channelId, userId]);
+  if (!ch) return;
+  const settings = await getBotSettings();
+  const fee = (settings?.platform_fee || 4900) / 100;
+  return editMessage(chatId, msgId,
+    `<b>💰 Renew Platform Fee</b>\n━━━━━━━━━━━━━━━━━━\n📢 <b>Channel:</b> ${ch.channel_name}\n💰 <b>Fee:</b> ₹${fee}\n\nPay via:`,
+    { reply_markup: inlineKeyboard([
+      [cbButton('💳 Pay via Razorpay', `renew_fee_razorpay_${channelId}`)],
+      [cbButton('🪙 Pay via TRX', `renew_fee_trx_${channelId}`)],
+    ]) }
+  );
+}
+
+async function initFeeRenewal(chatId, userId, channelId, msgId, method) {
+  const ch = await d1First('SELECT * FROM channels WHERE channel_id = ? AND creator_user_id = ?', [channelId, userId]);
+  if (!ch) return;
+  const plan = await d1First('SELECT id FROM plans WHERE channel_id = ? ORDER BY id ASC LIMIT 1', [channelId]);
+  if (!plan) {
+    return editMessage(chatId, msgId, `❌ <b>No plan found for this channel.</b>`,
+      { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'creator_channels')]]) });
+  }
+
+  const settings = await getBotSettings();
+  const feeAmount = settings?.platform_fee || 4900;
+  const sessionId = generateToken(16);
+  const expiresAt = Date.now() + 15 * 60 * 1000;
+
+  return createFeePaymentSession(chatId, userId, msgId, {
+    channelId, channelName: ch.channel_name, planId: plan.id,
+    feeAmount, sessionId, expiresAt, method, backCbData: `renew_fee_${channelId}`,
+  });
+}
+
+module.exports = {
+  showBecomeCreator, startCreatorSetup, handleChannelInput, showGatewaySetup,
+  showPlanSetup, showPlatformFeePayment, initPlatformFeePayment,
+  showFeeRenewal, initFeeRenewal,
+};

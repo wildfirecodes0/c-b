@@ -71,6 +71,10 @@ function runFraudChecks(payment, session) {
 
 async function processSuccessfulPayment(session, paymentData, method) {
   try {
+    if (session.user_id === session.creator_user_id) {
+      return completePlatformFeePayment(session, method);
+    }
+
     const [plan, channel, user] = await Promise.all([
       getPlan(session.plan_id),
       getChannel(session.channel_id),
@@ -146,6 +150,62 @@ async function processSuccessfulPayment(session, paymentData, method) {
     }
   } catch (err) {
     console.error('processSuccessfulPayment error:', err.message);
+  }
+}
+
+// Called when a platform-fee payment (creator paying to activate their own
+// channel) is confirmed — as opposed to a subscriber paying a creator.
+async function completePlatformFeePayment(session, method) {
+  try {
+    const now = Date.now();
+    const expiresAt = now + 30 * 24 * 60 * 60 * 1000;
+
+    const channelBefore = await d1First('SELECT platform_fee_paid, is_suspended FROM channels WHERE channel_id=?', [session.channel_id]);
+    const isRenewal = !!channelBefore?.platform_fee_paid;
+
+    await d1Run(
+      'UPDATE channels SET platform_fee_paid=1, platform_fee_expires_at=?, is_active=1, is_suspended=0, suspend_reason=NULL, updated_at=? WHERE channel_id=?',
+      [expiresAt, now, session.channel_id]
+    );
+    await d1Run(
+      'UPDATE creators SET onboarding_complete=1, updated_at=? WHERE user_id=?',
+      [now, session.creator_user_id]
+    );
+    const { updateUser, getUser, getChannel, getPlan } = require('../../db/index');
+    await updateUser(session.creator_user_id, { role: 'creator' });
+
+    const [user, channel, plan] = await Promise.all([
+      getUser(session.creator_user_id),
+      getChannel(session.channel_id),
+      getPlan(session.plan_id),
+    ]);
+
+    if (isRenewal) {
+      await sendMessage(session.creator_user_id,
+        `<b>✅ Platform Fee Renewed!</b>\n━━━━━━━━━━━━━━━━━━\n` +
+        `📢 <b>Channel:</b> ${channel?.channel_name}\n` +
+        `📅 <b>Valid Till:</b> ${formatDate(expiresAt)}\n\n` +
+        `Your channel is active again — new subscriptions are now open! 🎉`,
+        { reply_markup: inlineKeyboard([[cbButton('📊 Go to Dashboard', 'creator_dashboard')]]) }
+      );
+      return;
+    }
+
+    const joinLink = `https://t.me/${process.env.BOT_USERNAME}?start=join_${session.channel_id}`;
+    await sendMessage(session.creator_user_id,
+      `<b>🎉 Congratulations!</b>\n━━━━━━━━━━━━━━━━━━\nYour channel is now live on Crevio!\n\n` +
+      `📢 <b>Channel:</b> ${channel?.channel_name}\n` +
+      `💎 <b>Plan:</b> ${plan?.plan_type} — ₹${(plan?.price || 0) / 100}\n\n` +
+      `🔗 <b>Your Payment Link:</b>\n<code>${joinLink}</code>\n\nShare this link with your audience!`,
+      { reply_markup: inlineKeyboard([[cbButton('📊 Go to Dashboard', 'creator_dashboard')]]) }
+    );
+
+    await notifyAdmin('new_creator', {
+      fullName: user?.full_name, userId: session.creator_user_id,
+      channelName: channel?.channel_name, gateway: method,
+    });
+  } catch (err) {
+    console.error('completePlatformFeePayment error:', err.message);
   }
 }
 

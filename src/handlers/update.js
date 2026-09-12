@@ -119,7 +119,7 @@ async function handleChannelMember(update) {
         if (session?.current_step === 'waiting_channel_join') {
           await clearUserSession(userId);
           const { showMenu } = require('./user/start');
-          return showMenu(userId, user, session.data?.param);
+          return showMenu(chatId, userId, user, session.data?.param);
         }
       }
       return;

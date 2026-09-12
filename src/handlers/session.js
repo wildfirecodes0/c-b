@@ -38,6 +38,28 @@ async function handleSessionInput(msg, session) {
     return editMessage(chatId, msgId, `✅ <b>TRX Wallet Updated!</b>\n\n🪙 <b>Wallet:</b> <code>${text}</code>`, { reply_markup: inlineKeyboard([[cbButton('🔙 Back to Settings', 'creator_settings')]]) });
   }
 
+  // ---- ONBOARDING-SPECIFIC gateway steps (keep channel data alive through the flow) ----
+  if (step === 'creator_setup_razorpay_key') {
+    if (!text?.startsWith('rzp_')) return editMessage(chatId, msgId, `❌ <b>Invalid Key ID!</b>\n\nMust start with <code>rzp_live_</code>\n\nPlease enter again:`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'creator_setup_gateway')]]) });
+    await setUserSession(userId, 'creator_setup_razorpay_secret', { ...data, razorpayKey: text }, msgId);
+    return editMessage(chatId, msgId, `✅ <b>Key ID saved!</b>\n\n🔐 <b>Now enter your Razorpay Key Secret:</b>`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'creator_setup_gateway')]]) });
+  }
+
+  if (step === 'creator_setup_razorpay_secret') {
+    const encKey = encrypt(data.razorpayKey);
+    const encSecret = encrypt(text);
+    await d1Run('UPDATE creators SET razorpay_key=?, razorpay_secret=?, use_default_razorpay=0, updated_at=? WHERE user_id=?', [encKey, encSecret, Date.now(), userId]);
+    const { showPlanSetup } = require('./creator/onboarding');
+    return showPlanSetup(chatId, userId, msgId, data.channelId);
+  }
+
+  if (step === 'creator_setup_trx_wallet') {
+    if (!text?.startsWith('T') || text.length < 30) return editMessage(chatId, msgId, `❌ <b>Invalid TRX Wallet!</b>\n\nMust start with <code>T</code> and be valid TRC20.`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'creator_setup_gateway')]]) });
+    await d1Run('UPDATE creators SET trx_wallet=?, updated_at=? WHERE user_id=?', [text, Date.now(), userId]);
+    const { showPlanSetup } = require('./creator/onboarding');
+    return showPlanSetup(chatId, userId, msgId, data.channelId);
+  }
+
   if (step === 'creator_enter_plan_price') {
     const price = parseInt(text);
     if (isNaN(price) || price < 1) return editMessage(chatId, msgId, `❌ <b>Invalid price!</b> Enter a valid amount in ₹`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'creator_plans')]]) });
@@ -48,9 +70,19 @@ async function handleSessionInput(msg, session) {
   if (step === 'creator_enter_trial_days') {
     const trialDays = parseInt(text);
     if (isNaN(trialDays) || trialDays < 0) return editMessage(chatId, msgId, `❌ Invalid! Enter 0 or more days.`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'creator_plans')]]) });
-    await createPlan({ channelId: data.channelId, creatorUserId: userId, planName: `${data.planType?.charAt(0).toUpperCase()+data.planType?.slice(1)} Plan`, planType: data.planType, price: data.price * 100, trialDays });
-    await clearUserSession(userId);
-    return editMessage(chatId, msgId, `✅ <b>Plan Created!</b>\n\n💎 <b>Type:</b> ${data.planType}\n💰 <b>Price:</b> ₹${data.price}\n🎁 <b>Trial:</b> ${trialDays} days`, { reply_markup: inlineKeyboard([[cbButton('🔙 Back to Plans', 'creator_plans')]]) });
+
+    const existingChannel = await d1First('SELECT id FROM channels WHERE channel_id = ?', [data.channelId]);
+    if (existingChannel) {
+      // Adding a new plan to an already-active channel — create it immediately
+      await createPlan({ channelId: data.channelId, creatorUserId: userId, planName: `${data.planType?.charAt(0).toUpperCase()+data.planType?.slice(1)} Plan`, planType: data.planType, price: data.price * 100, trialDays });
+      await clearUserSession(userId);
+      return editMessage(chatId, msgId, `✅ <b>Plan Created!</b>\n\n💎 <b>Type:</b> ${data.planType}\n💰 <b>Price:</b> ₹${data.price}\n🎁 <b>Trial:</b> ${trialDays} days`, { reply_markup: inlineKeyboard([[cbButton('🔙 Back to Plans', 'creator_plans')]]) });
+    }
+
+    // First-time onboarding — channel doesn't exist yet, move to platform-fee payment
+    await setUserSession(userId, 'creator_setup_fee', { ...data, trialDays }, msgId);
+    const { showPlatformFeePayment } = require('./creator/onboarding');
+    return showPlatformFeePayment(chatId, userId, msgId);
   }
 
   if (step === 'admin_broadcast_message') {

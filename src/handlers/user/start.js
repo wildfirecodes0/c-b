@@ -1,5 +1,5 @@
 'use strict';
-const { getUser, createUser, getAdmin, getBotSettings, setUserSession, clearUserSession, generateToken } = require('../../db/index');
+const { getUser, createUser, getAdmin, getBotSettings, setUserSession, clearUserSession } = require('../../db/index');
 const { d1First } = require('../../db/d1');
 const { sendMessage, editMessage, getChatMember, inlineKeyboard, urlButton, cbButton } = require('../../utils/telegram');
 const { generateToken: genToken, formatDate } = require('../../utils/crypto');
@@ -35,8 +35,25 @@ async function showToS(chatId, firstName) {
     `👋 <b>Welcome, ${firstName}!</b>\n\nBefore continuing, please read and accept our Terms of Service.\n\n` +
     `📋 <b>Key Points:</b>\n• This platform is for users <b>18 years and above</b>\n` +
     `• Creators must comply with Telegram's Terms\n• Payments are non-refundable unless disputed`,
-    { reply_markup: inlineKeyboard([[urlButton('📖 Read Full ToS', `https://t.me/CrevioUpdates`)], [cbButton('✅ I Accept', 'tos_accept'), cbButton('❌ Decline', 'tos_decline')]]) }
+    { reply_markup: inlineKeyboard([[urlButton('📖 Read Full ToS', `https://t.me/CrevioUpdates/4`)], [cbButton('✅ I Accept', 'tos_accept'), cbButton('❌ Decline', 'tos_decline')]]) }
   );
+}
+
+async function promptChannelJoinAfterTos(chatId, msgId, userId, param = null) {
+  const user = await getUser(userId);
+  const memberCheck = await getChatMember(MAIN_CHANNEL, userId);
+  const status = memberCheck.result?.status;
+  const isMember = ['member', 'administrator', 'creator'].includes(status);
+
+  if (isMember) {
+    return showMenu(chatId, userId, user, param);
+  }
+
+  await editMessage(chatId, msgId,
+    `📢 <b>Almost there!</b>\n\n🔐 <b>Join our official channel to continue using Crevio Bot.</b> 👇`,
+    { reply_markup: inlineKeyboard([[urlButton('📢 Join Crevio Updates', 'https://t.me/CrevioUpdates')]]) }
+  );
+  await setUserSession(userId, 'waiting_channel_join', { param }, msgId);
 }
 
 async function checkChannelJoin(chatId, userId, firstName, user, param) {
@@ -101,4 +118,4 @@ async function notifyAdmin(type, data) {
   } catch (err) { console.error('notifyAdmin error:', err.message); }
 }
 
-module.exports = { handleStart, handleMenu, showMenu, notifyAdmin };
+module.exports = { handleStart, handleMenu, showMenu, notifyAdmin, promptChannelJoinAfterTos };

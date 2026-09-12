@@ -1,6 +1,6 @@
 'use strict';
-const { d1All, d1First } = require('../../db/d1');
-const { editMessage, inlineKeyboard, cbButton, urlButton } = require('../../utils/telegram');
+const { d1All, d1First, d1Run } = require('../../db/d1');
+const { editMessage, inlineKeyboard, cbButton, urlButton, sendMessage, kickChatMember } = require('../../utils/telegram');
 const { formatDate } = require('../../utils/crypto');
 
 async function showCreatorChannels(chatId, userId, page, msgId) {
@@ -47,4 +47,47 @@ async function showCreatorChannelDetail(chatId, userId, channelId, msgId) {
   );
 }
 
-module.exports = { showCreatorChannels, showCreatorChannelDetail };
+module.exports = { showCreatorChannels, showCreatorChannelDetail, showEditChannel, togglePauseChannel, confirmDeleteChannel, deleteChannel };
+
+async function showEditChannel(chatId, userId, channelId, msgId) {
+  const ch = await d1First('SELECT * FROM channels WHERE channel_id = ? AND creator_user_id = ?', [channelId, userId]);
+  if (!ch) return;
+  const name = ch.username ? `@${ch.username}` : ch.channel_name;
+  return editMessage(chatId, msgId,
+    `<b>✏️ Edit Channel</b>\n━━━━━━━━━━━━━━━━━━\n📢 <b>Channel:</b> ${name}\n🌐 <b>Status:</b> ${ch.is_paused ? '⏸ Paused (new joins blocked)' : '✅ Active'}\n\n<i>Pausing stops new members from joining while keeping existing members' access intact.</i>`,
+    { reply_markup: inlineKeyboard([
+      [cbButton(ch.is_paused ? '▶️ Resume Channel' : '⏸ Pause Channel', `toggle_pause_channel_${channelId}`)],
+      [cbButton('🔙 Back', `creator_channel_detail_${channelId}`)],
+    ]) }
+  );
+}
+
+async function togglePauseChannel(chatId, userId, channelId, msgId) {
+  const ch = await d1First('SELECT is_paused FROM channels WHERE channel_id = ? AND creator_user_id = ?', [channelId, userId]);
+  if (!ch) return;
+  await d1Run('UPDATE channels SET is_paused = ?, updated_at = ? WHERE channel_id = ?', [ch.is_paused ? 0 : 1, Date.now(), channelId]);
+  return showEditChannel(chatId, userId, channelId, msgId);
+}
+
+async function confirmDeleteChannel(chatId, userId, channelId, msgId) {
+  const ch = await d1First('SELECT channel_name FROM channels WHERE channel_id = ? AND creator_user_id = ?', [channelId, userId]);
+  if (!ch) return;
+  return editMessage(chatId, msgId,
+    `<b>🗑 Delete Channel?</b>\n━━━━━━━━━━━━━━━━━━\n⚠️ This will cancel all active subscriptions for <i>${ch.channel_name}</i> and remove it from Crevio.\n\n<b>This cannot be undone.</b>`,
+    { reply_markup: inlineKeyboard([[cbButton('✅ Yes, Delete', `delete_channel_confirm_${channelId}`), cbButton('❌ Cancel', `creator_channel_detail_${channelId}`)]]) }
+  );
+}
+
+async function deleteChannel(chatId, userId, channelId, msgId) {
+  const ch = await d1First('SELECT id, channel_name FROM channels WHERE channel_id = ? AND creator_user_id = ?', [channelId, userId]);
+  if (!ch) return;
+  const activeSubs = await d1All("SELECT user_id FROM subscriptions WHERE channel_id = ? AND status = 'active'", [channelId]);
+  for (const sub of activeSubs) {
+    try { await kickChatMember(channelId, sub.user_id); } catch (e) {}
+    try { await sendMessage(sub.user_id, `❌ <b>Channel Removed</b>\n\n<i>${ch.channel_name}</i> has been removed by its creator. Your access has ended.`); } catch (e) {}
+  }
+  await d1Run("UPDATE subscriptions SET status='cancelled', cancelled_at=?, updated_at=? WHERE channel_id=? AND status='active'", [Date.now(), Date.now(), channelId]);
+  await d1Run('UPDATE plans SET is_active = 0, updated_at = ? WHERE channel_id = ?', [Date.now(), channelId]);
+  await d1Run('DELETE FROM channels WHERE channel_id = ?', [channelId]);
+  return editMessage(chatId, msgId, `✅ <b>Channel Deleted!</b>`, { reply_markup: inlineKeyboard([[cbButton('🔙 Back to List', 'creator_channels')]]) });
+}

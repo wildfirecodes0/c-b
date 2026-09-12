@@ -76,14 +76,15 @@ async function getChannel(channelId) {
 
 async function createChannel(data) {
   const now = Date.now();
-  await d1Run(
-    `INSERT INTO channels (channel_id, channel_name, username, creator_user_id, category, type, platform_fee_paid, platform_fee_expires_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  const result = await d1Run(
+    `INSERT INTO channels (channel_id, channel_name, username, creator_user_id, category, type, platform_fee_paid, platform_fee_expires_at, is_active, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [data.channelId, data.channelName, data.username || null, data.creatorUserId,
      data.category || null, data.type || 'public', data.platformFeePaid ? 1 : 0,
-     data.platformFeeExpiresAt || null, now, now]
+     data.platformFeeExpiresAt || null, data.isActive === false ? 0 : 1, now, now]
   );
   cache.del(`channel:${data.channelId}`);
+  return result;
 }
 
 async function updateChannel(channelId, fields) {

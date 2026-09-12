@@ -198,4 +198,14 @@ async function toggleMaintenance(chatId, userId, msgId) {
   return editMessage(chatId,msgId,`${newMode?'🔧':'✅'} <b>Maintenance Mode ${newMode?'ON':'OFF'}!</b>`,{reply_markup:inlineKeyboard([[cbButton('🔙 Back to Settings','admin_settings')]])});
 }
 
-module.exports = { handleAdminCommand, showAdminCreators, showAdminCreatorDetail, showAdminUsers, showAdminUserDetail, banUser, unbanUser, showAdminChannels, showAdminChannelDetail, showAdminTransactions, showAdminTxnDetail, showAdminRevenue, showAdminBroadcast, showAdminSettings, toggleMaintenance };
+async function downloadAdminTransactionsPDF(chatId, userId) {
+  const txns = await d1All(`SELECT t.*, u.full_name, c.channel_name, cu.full_name as creator_name, p.plan_type FROM transactions t JOIN users u ON t.user_id=u.user_id JOIN channels c ON t.channel_id=c.channel_id JOIN users cu ON t.creator_user_id=cu.user_id JOIN plans p ON t.plan_id=p.id ORDER BY t.created_at DESC`);
+  const total = txns.reduce((s,t)=>t.status==='success'?s+t.amount:s,0);
+  const commission = txns.reduce((s,t)=>t.status==='success'?s+(t.commission||0):s,0);
+  const rows = txns.map((t,i)=>`<tr><td>${i+1}</td><td>${t.full_name}</td><td>${t.creator_name}</td><td>${t.channel_name}</td><td>₹${t.amount/100}</td><td>${t.method}</td><td>${t.status}</td><td>${new Date(t.created_at).toLocaleDateString('en-IN')}</td></tr>`).join('');
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>body{font-family:Arial;padding:20px;background:#0f0f0f;color:#fff}.header{text-align:center;padding:30px;background:linear-gradient(135deg,#667eea,#764ba2);border-radius:12px;margin-bottom:30px}.watermark{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-45deg);font-size:60px;opacity:.05;color:#667eea;font-weight:bold;pointer-events:none}table{width:100%;border-collapse:collapse;background:#1a1a2e}th{background:#667eea;padding:12px;text-align:left}td{padding:10px;border-bottom:1px solid #2a2a4a}.total{text-align:right;padding:15px;font-size:18px;font-weight:bold;color:#667eea}</style></head><body><div class="watermark">CREVIO</div><div class="header"><h1>🌟 CREVIO</h1><p>Admin Transaction Report</p><p>Generated ${formatDate(Date.now())}</p></div><table><thead><tr><th>#</th><th>User</th><th>Creator</th><th>Channel</th><th>Amount</th><th>Method</th><th>Status</th><th>Date</th></tr></thead><tbody>${rows}</tbody></table><div class="total">Total Revenue: ₹${total/100}<br>Total Commission: ₹${commission/100}</div></body></html>`;
+  const { sendDocument } = require('../../utils/telegram');
+  await sendDocument(chatId, Buffer.from(html), 'Crevio_Admin_Transactions.html', '📊 <b>Admin Transaction Report</b>');
+}
+
+module.exports = { handleAdminCommand, showAdminCreators, showAdminCreatorDetail, showAdminUsers, showAdminUserDetail, banUser, unbanUser, showAdminChannels, showAdminChannelDetail, showAdminTransactions, showAdminTxnDetail, downloadAdminTransactionsPDF, showAdminRevenue, showAdminBroadcast, showAdminSettings, toggleMaintenance };
