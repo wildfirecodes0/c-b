@@ -86,8 +86,13 @@ async function deleteChannel(chatId, userId, channelId, msgId) {
     try { await kickChatMember(channelId, sub.user_id); } catch (e) {}
     try { await sendMessage(sub.user_id, `❌ <b>Channel Removed</b>\n\n<i>${ch.channel_name}</i> has been removed by its creator. Your access has ended.`); } catch (e) {}
   }
-  await d1Run("UPDATE subscriptions SET status='cancelled', cancelled_at=?, updated_at=? WHERE channel_id=? AND status='active'", [Date.now(), Date.now(), channelId]);
-  await d1Run('UPDATE plans SET is_active = 0, updated_at = ? WHERE channel_id = ?', [Date.now(), channelId]);
-  await d1Run('DELETE FROM channels WHERE channel_id = ?', [channelId]);
+  // Cancel all subscriptions
+  await d1Run("UPDATE subscriptions SET status='cancelled', cancelled_at=?, updated_at=? WHERE channel_id=?", [Date.now(), Date.now(), channelId]);
+  // Expire all pending payment sessions for this channel
+  await d1Run("UPDATE payment_sessions SET status='expired', updated_at=? WHERE channel_id=?", [Date.now(), channelId]);
+  // Deactivate plans
+  await d1Run('UPDATE plans SET is_active=0, updated_at=? WHERE channel_id=?', [Date.now(), channelId]);
+  // Now safe to delete channel
+  await d1Run('DELETE FROM channels WHERE channel_id=?', [channelId]);
   return editMessage(chatId, msgId, `✅ <b>Channel Deleted!</b>`, { reply_markup: inlineKeyboard([[cbButton('🔙 Back to List', 'creator_channels')]]) });
 }
