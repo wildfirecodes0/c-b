@@ -9,7 +9,7 @@ async function showCreatorChannels(chatId, userId, page, msgId) {
   const total = await d1First('SELECT COUNT(*) as c FROM channels WHERE creator_user_id = ?', [userId]);
   if (!channels.length) {
     return editMessage(chatId, msgId, `<b>📢 Your Channels</b>\n━━━━━━━━━━━━━━━━━━\n\nNo channels added yet.`,
-      { reply_markup: inlineKeyboard([[urlButton('➕ Add Channel', `https://t.me/${process.env.BOT_USERNAME}?startchannel=true`)], [cbButton('🔙 Back', 'creator_menu')]]) });
+      { reply_markup: inlineKeyboard([[cbButton('➕ Add New Channel', 'creator_start_setup')], [cbButton('🔙 Back', 'creator_menu')]]) });
   }
   let text = `<b>📢 Your Channels</b>\n━━━━━━━━━━━━━━━━━━\n`;
   channels.forEach((ch, i) => {
@@ -25,7 +25,7 @@ async function showCreatorChannels(chatId, userId, page, msgId) {
   if(page>1)nav.push(cbButton('◀️ Prev',`creator_channels_page_${page-1}`));
   if((total?.c||0)>page*limit)nav.push(cbButton('Next ▶️',`creator_channels_page_${page+1}`));
   if(nav.length)buttons.push(nav);
-  buttons.push([urlButton('➕ Add Channel', `https://t.me/${process.env.BOT_USERNAME}?startchannel=true`)]);
+  buttons.push([cbButton('➕ Add New Channel', 'creator_start_setup')]);
   buttons.push([cbButton('🔙 Back', 'creator_menu')]);
   return editMessage(chatId, msgId, text, { reply_markup: inlineKeyboard(buttons) });
 }

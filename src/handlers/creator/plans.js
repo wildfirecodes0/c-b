@@ -127,8 +127,30 @@ async function showCreatorSettings(chatId, userId, msgId) {
   const trx=creator?.trx_wallet?`<code>${creator.trx_wallet.substring(0,10)}...</code> ✅`:'Not set ❌';
   return editMessage(chatId,msgId,
     `<b>⚙️ Settings</b>\n━━━━━━━━━━━━━━━━━━\n💳 <b>Payment Gateway:</b> ${gw}\n🪙 <b>TRX Wallet:</b> ${trx}\n🔔 <b>Notifications:</b> ✅ On`,
-    {reply_markup:inlineKeyboard([[cbButton('💳 Update Razorpay Keys','settings_update_razorpay')],[cbButton('🪙 Update TRX Wallet','settings_update_trx')],[cbButton('🔔 Toggle Notifications','settings_toggle_notif')],[cbButton('🔙 Back','creator_menu')]])}
+    {reply_markup:inlineKeyboard([[cbButton('💳 Update Razorpay Keys','settings_update_razorpay')],[cbButton('🪙 Update TRX Wallet','settings_update_trx')],[cbButton('🎟 My Coupons','creator_coupons')],[cbButton('🔔 Toggle Notifications','settings_toggle_notif')],[cbButton('🔙 Back','creator_menu')]])}
   );
+}
+
+async function showCreatorCoupons(chatId, userId, msgId) {
+  const coupons = await d1All('SELECT c.*, ch.channel_name FROM coupons c JOIN channels ch ON c.channel_id = ch.channel_id WHERE c.creator_user_id = ? ORDER BY c.created_at DESC LIMIT 20', [userId]);
+  let text = `<b>🎟 My Coupons</b>\n━━━━━━━━━━━━━━━━━━\n`;
+  if (!coupons.length) text += `<i>No coupons yet. Create one to offer discounts on your plans!</i>`;
+  else {
+    text += coupons.map(c => {
+      const val = c.discount_type === 'percent' ? `${c.discount_value}%` : `₹${c.discount_value/100}`;
+      return `🎟 <code>${c.code}</code> — ${val} off — ${c.channel_name}\n   Used: ${c.used_count}${c.max_uses ? `/${c.max_uses}` : ''}`;
+    }).join('\n\n');
+  }
+  return editMessage(chatId, msgId, text, { reply_markup: inlineKeyboard([[cbButton('➕ Create New', 'creator_coupon_create')], [cbButton('🔙 Back', 'creator_settings')]]) });
+}
+
+async function showCreatorCouponChannelSelect(chatId, userId, msgId) {
+  const channels = await d1All('SELECT channel_id, channel_name FROM channels WHERE creator_user_id = ?', [userId]);
+  if (!channels.length) {
+    return editMessage(chatId, msgId, `❌ <b>You need at least one channel to create a coupon.</b>`, { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'creator_coupons')]]) });
+  }
+  return editMessage(chatId, msgId, `<b>🎟 Create Coupon</b>\n━━━━━━━━━━━━━━━━━━\n📢 <b>Select a channel:</b>`,
+    { reply_markup: inlineKeyboard([...channels.map(c => [cbButton(c.channel_name, `coupon_channel_${c.channel_id}`)]), [cbButton('🔙 Cancel', 'creator_coupons')]]) });
 }
 
 // ---- PUBLIC PAGE ----
@@ -165,4 +187,4 @@ async function togglePlanActive(chatId, userId, planId, msgId) {
   return showPlanDetail(chatId, userId, planId, msgId);
 }
 
-module.exports = { showCreatorPlans, showAddPlanChannelSelect, showPlanDetail, togglePlanActive, showCreatorMembers, showMemberDetail, extendMember, removeMember, showCreatorPayments, showCreatorPaymentDetail, downloadCreatorPaymentsPDF, showCreatorSettings, showCreatorPage };
+module.exports = { showCreatorPlans, showAddPlanChannelSelect, showPlanDetail, togglePlanActive, showCreatorMembers, showMemberDetail, extendMember, removeMember, showCreatorPayments, showCreatorPaymentDetail, downloadCreatorPaymentsPDF, showCreatorSettings, showCreatorCoupons, showCreatorCouponChannelSelect, showCreatorPage };

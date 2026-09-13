@@ -22,6 +22,12 @@ async function createUser(data) {
      VALUES (?, ?, ?, 'en', 'user', 0, ?, ?, ?, ?)`,
     [data.userId, data.username || null, data.fullName, data.referralCode, data.referredBy || null, now, now]
   );
+  if (data.referredBy) {
+    await d1Run(
+      `INSERT INTO referrals (referrer_user_id, referred_user_id, status, created_at) VALUES (?, ?, 'pending', ?)`,
+      [data.referredBy, data.userId, now]
+    );
+  }
   return getUser(data.userId);
 }
 
@@ -169,11 +175,12 @@ async function updateSubscription(id, fields) {
 async function createPaymentSession(data) {
   const now = Date.now();
   await d1Run(
-    `INSERT INTO payment_sessions (session_id, user_id, channel_id, plan_id, creator_user_id, amount, method, status, razorpay_link_id, trx_wallet, trx_amount_usdt, expires_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO payment_sessions (session_id, user_id, channel_id, plan_id, creator_user_id, amount, method, status, razorpay_link_id, trx_wallet, trx_amount_usdt, coupon_code, coupon_type, coupon_id, discount_amount, expires_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [data.sessionId, data.userId, data.channelId, data.planId, data.creatorUserId,
      data.amount, data.method, data.razorpayLinkId || null, data.trxWallet || null,
-     data.trxAmountUsdt || null, data.expiresAt, now, now]
+     data.trxAmountUsdt || null, data.couponCode || null, data.couponType || null,
+     data.couponId || null, data.discountAmount || 0, data.expiresAt, now, now]
   );
 }
 
@@ -346,9 +353,19 @@ async function markTrialUsed(userId, channelId, expiresAt) {
 // ============================================
 // REFERRALS
 // ============================================
-async function handleReferralReward(referrerUserId) {
+async function handleReferralReward(referrerUserId, referredUserId) {
+  const referral = await d1First(
+    "SELECT * FROM referrals WHERE referrer_user_id = ? AND referred_user_id = ?",
+    [referrerUserId, referredUserId]
+  );
+  if (!referral || referral.status === 'converted') return false; // already rewarded, or no such referral
+  await d1Run(
+    "UPDATE referrals SET status='converted', converted_at=?, free_days_given=1 WHERE id=?",
+    [Date.now(), referral.id]
+  );
   await d1Run('UPDATE users SET free_days_earned = free_days_earned + 1, updated_at = ? WHERE user_id = ?', [Date.now(), referrerUserId]);
   cache.del(`user:${referrerUserId}`);
+  return true;
 }
 
 // ============================================
@@ -358,10 +375,38 @@ async function createTicket(data) {
   const ticketId = `TKT${Date.now()}`;
   const now = Date.now();
   await d1Run(
-    `INSERT INTO support_tickets (ticket_id, user_id, subject, message, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'open', ?, ?)`,
-    [ticketId, data.userId, data.subject, data.message, now, now]
+    `INSERT INTO support_tickets (ticket_id, user_id, subject, message, media_type, media_file_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?)`,
+    [ticketId, data.userId, data.subject, data.message || null, data.mediaType || null, data.mediaFileId || null, now, now]
   );
   return ticketId;
+}
+
+async function getTicket(ticketId) {
+  return d1First('SELECT * FROM support_tickets WHERE ticket_id = ?', [ticketId]);
+}
+
+async function addTicketReply(data) {
+  const now = Date.now();
+  await d1Run(
+    `INSERT INTO ticket_replies (ticket_id, sender_id, sender_role, message, media_type, media_file_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [data.ticketId, data.senderId, data.senderRole, data.message || null, data.mediaType || null, data.mediaFileId || null, now]
+  );
+  await d1Run("UPDATE support_tickets SET status='in_progress', updated_at=? WHERE ticket_id=?", [now, data.ticketId]);
+}
+
+async function getTicketReplies(ticketId) {
+  return d1All('SELECT * FROM ticket_replies WHERE ticket_id = ? ORDER BY created_at ASC', [ticketId]);
+}
+
+// Wipes the ticket's content (subject/message/media/replies) but keeps the
+// ticket_id + status='closed' so the user can still track it by ID.
+async function closeTicketAndWipe(ticketId) {
+  const now = Date.now();
+  await d1Run('DELETE FROM ticket_replies WHERE ticket_id = ?', [ticketId]);
+  await d1Run(
+    "UPDATE support_tickets SET subject=NULL, message=NULL, media_type=NULL, media_file_id=NULL, status='closed', closed_at=?, updated_at=? WHERE ticket_id=?",
+    [now, now, ticketId]
+  );
 }
 
 // ============================================
@@ -369,6 +414,52 @@ async function createTicket(data) {
 // ============================================
 async function getCoupon(code) {
   return d1First("SELECT * FROM coupons WHERE code = ? AND is_active = 1", [code.toUpperCase()]);
+}
+
+// Checks a code against admin promo_codes first (platform-wide), then
+// creator coupons (scoped to this plan's channel/creator). Returns
+// { valid, type: 'promo'|'coupon', record, discountAmount } or { valid: false, reason }.
+async function validateDiscountCode(code, plan) {
+  const upperCode = code.trim().toUpperCase();
+  const now = Date.now();
+
+  const promo = await d1First("SELECT * FROM promo_codes WHERE code = ? AND is_active = 1", [upperCode]);
+  if (promo) {
+    if (promo.expires_at && promo.expires_at < now) return { valid: false, reason: 'This code has expired.' };
+    if (promo.max_uses && promo.used_count >= promo.max_uses) return { valid: false, reason: 'This code has reached its usage limit.' };
+    const discountAmount = computeDiscount(plan.price, promo.discount_type, promo.discount_value);
+    return { valid: true, type: 'promo', record: promo, discountAmount };
+  }
+
+  const coupon = await d1First("SELECT * FROM coupons WHERE code = ? AND is_active = 1", [upperCode]);
+  if (coupon) {
+    if (coupon.expires_at && coupon.expires_at < now) return { valid: false, reason: 'This code has expired.' };
+    if (coupon.max_uses && coupon.used_count >= coupon.max_uses) return { valid: false, reason: 'This code has reached its usage limit.' };
+    if (coupon.channel_id && coupon.channel_id !== plan.channel_id) return { valid: false, reason: 'This code is not valid for this channel.' };
+    if (coupon.plan_id && coupon.plan_id !== plan.id) return { valid: false, reason: 'This code is not valid for this plan.' };
+    const discountAmount = computeDiscount(plan.price, coupon.discount_type, coupon.discount_value);
+    return { valid: true, type: 'coupon', record: coupon, discountAmount };
+  }
+
+  return { valid: false, reason: 'Invalid code.' };
+}
+
+function computeDiscount(price, discountType, discountValue) {
+  if (discountType === 'percent') return Math.min(price, Math.floor(price * discountValue / 100));
+  if (discountType === 'flat') return Math.min(price, discountValue); // discountValue in paise
+  if (discountType === 'free_channel') return price; // 100% off
+  return 0;
+}
+
+async function recordCodeUsage(type, recordId, userId, transactionId = null) {
+  const now = Date.now();
+  if (type === 'promo') {
+    await d1Run('UPDATE promo_codes SET used_count = used_count + 1, updated_at = ? WHERE id = ?', [now, recordId]);
+    await d1Run('INSERT INTO coupon_usage (promo_id, user_id, transaction_id, used_at) VALUES (?, ?, ?, ?)', [recordId, userId, transactionId, now]);
+  } else {
+    await d1Run('UPDATE coupons SET used_count = used_count + 1, updated_at = ? WHERE id = ?', [now, recordId]);
+    await d1Run('INSERT INTO coupon_usage (coupon_id, user_id, transaction_id, used_at) VALUES (?, ?, ?, ?)', [recordId, userId, transactionId, now]);
+  }
 }
 
 // ============================================
@@ -402,6 +493,7 @@ module.exports = {
   checkRateLimit,
   hasUsedTrial, markTrialUsed,
   handleReferralReward,
-  createTicket, getCoupon,
+  createTicket, getTicket, addTicketReply, getTicketReplies, closeTicketAndWipe, getCoupon,
+  validateDiscountCode, recordCodeUsage,
   getUSDTRate,
 };

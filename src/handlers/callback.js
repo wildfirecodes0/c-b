@@ -92,6 +92,31 @@ async function handleCallback(cb) {
       `<b>🎫 Raise a Support Ticket</b>\n━━━━━━━━━━━━━━━━━━\n✏️ <b>Enter a short subject for your issue:</b>`,
       { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'user_support')]]) });
   }
+  if (data === 'support_track_ticket_start') {
+    await setUserSession(userId, 'support_track_ticket', {}, msgId);
+    return editMessage(chatId, msgId,
+      `<b>🔍 Track a Ticket</b>\n━━━━━━━━━━━━━━━━━━\n✏️ <b>Enter your Ticket ID:</b>\n📌 <i>Example: TKT1234567890</i>`,
+      { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'user_support')]]) });
+  }
+  if (data.startsWith('ticket_followup_')) {
+    const ticketId = data.replace('ticket_followup_', '');
+    await setUserSession(userId, 'user_ticket_followup', { ticketId }, msgId);
+    return editMessage(chatId, msgId,
+      `<b>💬 Send Follow-up</b>\n━━━━━━━━━━━━━━━━━━\n🆔 <b>Ticket:</b> <code>${ticketId}</code>\n\n✏️ <b>Type your message</b> (or send a photo/video/document):`,
+      { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'user_support')]]) });
+  }
+  if (data.startsWith('ticket_reply_')) {
+    const ticketId = data.replace('ticket_reply_', '');
+    await setUserSession(userId, 'admin_ticket_reply', { ticketId }, msgId);
+    return editMessage(chatId, msgId,
+      `<b>↩️ Reply to Ticket</b>\n━━━━━━━━━━━━━━━━━━\n🆔 <code>${ticketId}</code>\n\n✏️ <b>Type your reply</b> (or send a photo/video/document):`,
+      { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'admin_menu')]]) });
+  }
+  if (data.startsWith('ticket_close_')) {
+    const ticketId = data.replace('ticket_close_', '');
+    const { closeTicketWithPDF } = require('./admin/tickets');
+    return closeTicketWithPDF(chatId, ticketId, msgId);
+  }
   if (data === 'user_become_creator') {
     const { showBecomeCreator } = require('./creator/onboarding');
     return showBecomeCreator(chatId, userId, msgId);
@@ -203,6 +228,13 @@ async function handleCallback(cb) {
     const { showCreatorPlans } = require('./creator/plans');
     return showCreatorPlans(chatId, userId, page, msgId);
   }
+  if (data.startsWith('apply_coupon_')) {
+    const planId = parseInt(data.replace('apply_coupon_', ''));
+    await setUserSession(userId, 'enter_coupon_code', { planId }, msgId);
+    return editMessage(chatId, msgId,
+      `<b>🎟 Apply Coupon Code</b>\n━━━━━━━━━━━━━━━━━━\n✏️ <b>Enter your coupon/promo code:</b>`,
+      { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', `select_plan_${planId}`)]]) });
+  }
   if (data === 'add_plan_select_channel') {
     const { showAddPlanChannelSelect } = require('./creator/plans');
     return showAddPlanChannelSelect(chatId, userId, msgId);
@@ -312,7 +344,7 @@ async function handleCallback(cb) {
     const target = data.replace('broadcast_', '');
     await setUserSession(userId, 'admin_broadcast_message', { target }, msgId);
     return editMessage(chatId, msgId,
-      `<b>📣 Broadcast</b>\n━━━━━━━━━━━━━━━━━━\n✏️ <b>Send your message now:</b>`,
+      `<b>📣 Broadcast</b>\n━━━━━━━━━━━━━━━━━━\n✏️ <b>Send your message now.</b>\n📎 <i>You can also attach a photo, video, voice note, or document.</i>`,
       { reply_markup: inlineKeyboard([[cbButton('❌ Cancel', 'admin_broadcast')]]) });
   }
 
@@ -342,11 +374,15 @@ async function handleCallback(cb) {
     return editMessage(chatId, msgId, '✅ <b>Creator Verified!</b>', { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'admin_creators')]]) });
   }
   if (data.startsWith('admin_suspend_creator_')) {
-    await require('../db/d1').d1Run('UPDATE channels SET is_suspended=1, is_active=0, updated_at=? WHERE creator_user_id=?',[Date.now(),parseInt(data.replace('admin_suspend_creator_',''))]);
+    const targetCreatorId = parseInt(data.replace('admin_suspend_creator_', ''));
+    await require('../db/d1').d1Run('UPDATE creators SET is_suspended=1, updated_at=? WHERE user_id=?', [Date.now(), targetCreatorId]);
+    await require('../db/d1').d1Run('UPDATE channels SET is_suspended=1, is_active=0, updated_at=? WHERE creator_user_id=?',[Date.now(),targetCreatorId]);
     return editMessage(chatId, msgId, '🚫 <b>Creator Suspended!</b>', { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'admin_creators')]]) });
   }
   if (data.startsWith('admin_activate_creator_')) {
-    await require('../db/d1').d1Run('UPDATE channels SET is_suspended=0, is_active=1, updated_at=? WHERE creator_user_id=?',[Date.now(),parseInt(data.replace('admin_activate_creator_',''))]);
+    const targetCreatorId = parseInt(data.replace('admin_activate_creator_', ''));
+    await require('../db/d1').d1Run('UPDATE creators SET is_suspended=0, updated_at=? WHERE user_id=?', [Date.now(), targetCreatorId]);
+    await require('../db/d1').d1Run('UPDATE channels SET is_suspended=0, is_active=1, updated_at=? WHERE creator_user_id=?',[Date.now(),targetCreatorId]);
     return editMessage(chatId, msgId, '✅ <b>Creator Activated!</b>', { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'admin_creators')]]) });
   }
   if (data === 'admin_users' || data.startsWith('admin_users_page_')) {
@@ -417,6 +453,47 @@ async function handleCallback(cb) {
   if (data === 'admin_change_commission') {
     await setUserSession(userId, 'admin_change_commission', {}, msgId);
     return editMessage(chatId, msgId, `<b>📊 Enter New Commission %:</b>\n📌 <i>Example: 5</i>`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'admin_settings')]]) });
+  }
+  if (data === 'admin_promo_codes') {
+    const { showAdminPromoCodes } = require('./admin/setup');
+    return showAdminPromoCodes(chatId, userId, msgId);
+  }
+  if (data === 'admin_promo_create') {
+    await setUserSession(userId, 'admin_promo_code', {}, msgId);
+    return editMessage(chatId, msgId,
+      `<b>🎟 Create Promo Code</b>\n━━━━━━━━━━━━━━━━━━\n✏️ <b>Enter the code</b> (e.g. WELCOME50):`,
+      { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'admin_promo_codes')]]) });
+  }
+  if (data.startsWith('promo_type_')) {
+    const type = data.replace('promo_type_', '');
+    const session = await require('../db/index').getUserSession(userId);
+    await setUserSession(userId, 'admin_promo_value', { ...session?.data, type }, msgId);
+    return editMessage(chatId, msgId,
+      `✅ Type: <b>${type === 'percent' ? 'Percentage' : 'Flat Amount'}</b>\n\n✏️ <b>Enter the ${type === 'percent' ? 'discount %' : 'discount amount in ₹'}:</b>`,
+      { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'admin_promo_codes')]]) });
+  }
+  if (data === 'creator_coupons') {
+    const { showCreatorCoupons } = require('./creator/plans');
+    return showCreatorCoupons(chatId, userId, msgId);
+  }
+  if (data === 'creator_coupon_create') {
+    const { showCreatorCouponChannelSelect } = require('./creator/plans');
+    return showCreatorCouponChannelSelect(chatId, userId, msgId);
+  }
+  if (data.startsWith('coupon_channel_')) {
+    const channelId = parseInt(data.replace('coupon_channel_', ''));
+    await setUserSession(userId, 'creator_coupon_code', { channelId }, msgId);
+    return editMessage(chatId, msgId,
+      `<b>🎟 Create Coupon</b>\n━━━━━━━━━━━━━━━━━━\n✏️ <b>Enter the code</b> (e.g. SAVE20):`,
+      { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'creator_coupons')]]) });
+  }
+  if (data.startsWith('coupon_type_')) {
+    const type = data.replace('coupon_type_', '');
+    const session = await require('../db/index').getUserSession(userId);
+    await setUserSession(userId, 'creator_coupon_value', { ...session?.data, type }, msgId);
+    return editMessage(chatId, msgId,
+      `✅ Type: <b>${type === 'percent' ? 'Percentage' : 'Flat Amount'}</b>\n\n✏️ <b>Enter the ${type === 'percent' ? 'discount %' : 'discount amount in ₹'}:</b>`,
+      { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'creator_coupons')]]) });
   }
   if (data === 'admin_toggle_maintenance') {
     const { toggleMaintenance } = require('./admin/settings');

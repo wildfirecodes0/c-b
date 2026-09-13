@@ -74,6 +74,8 @@ CREATE TABLE IF NOT EXISTS creators (
     total_members INTEGER DEFAULT 0,
     affiliate_code TEXT UNIQUE,
     onboarding_complete INTEGER DEFAULT 0,
+    is_suspended INTEGER DEFAULT 0,
+    suspend_reason TEXT,
     weekly_stats_email TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
@@ -182,6 +184,10 @@ CREATE TABLE IF NOT EXISTS payment_sessions (
     trx_wallet TEXT,
     trx_amount_usdt REAL,
     trx_txn_hash TEXT,
+    coupon_code TEXT,
+    coupon_type TEXT, -- 'coupon' (creator) or 'promo' (admin)
+    coupon_id INTEGER,
+    discount_amount INTEGER DEFAULT 0, -- paise saved
     expires_at INTEGER NOT NULL,
     retry_count INTEGER DEFAULT 0,
     created_at INTEGER NOT NULL,
@@ -354,12 +360,15 @@ CREATE TABLE IF NOT EXISTS support_tickets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ticket_id TEXT UNIQUE NOT NULL,
     user_id INTEGER NOT NULL,
-    subject TEXT NOT NULL,
-    message TEXT NOT NULL,
+    subject TEXT,
+    message TEXT,
+    media_type TEXT, -- photo, video, document, voice, animation
+    media_file_id TEXT,
     status TEXT DEFAULT 'open', -- open, in_progress, resolved, closed
     priority TEXT DEFAULT 'normal', -- low, normal, high
     assigned_to INTEGER, -- admin user_id
     resolved_at INTEGER,
+    closed_at INTEGER,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(user_id)
@@ -374,7 +383,9 @@ CREATE TABLE IF NOT EXISTS ticket_replies (
     ticket_id TEXT NOT NULL,
     sender_id INTEGER NOT NULL,
     sender_role TEXT NOT NULL, -- user, admin
-    message TEXT NOT NULL,
+    message TEXT,
+    media_type TEXT,
+    media_file_id TEXT,
     created_at INTEGER NOT NULL,
     FOREIGN KEY (ticket_id) REFERENCES support_tickets(ticket_id)
 );

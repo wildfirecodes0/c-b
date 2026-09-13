@@ -17,6 +17,22 @@ async function handleUpdate(update) {
       const cb = update.callback_query;
       const userId = cb.from.id;
       if (!checkRateLimit(userId, 'callback', 30, 60000)) return;
+
+      const admin = await getAdmin();
+      const isAdmin = admin && admin.user_id === userId;
+
+      const settings = await getBotSettings();
+      if (settings?.maintenance_mode && !isAdmin) {
+        const { answerCallback } = require('../utils/telegram');
+        return answerCallback(cb.id, '🔧 Bot is under maintenance. Please try again later.', true);
+      }
+
+      const user = await getUser(userId);
+      if (user?.is_banned && !isAdmin) {
+        const { answerCallback } = require('../utils/telegram');
+        return answerCallback(cb.id, '🚫 You have been banned from using this bot.', true);
+      }
+
       const { handleCallback } = require('./callback');
       return handleCallback(cb);
     }
@@ -38,12 +54,18 @@ async function handleUpdate(update) {
 
       // Maintenance mode
       const settings = await getBotSettings();
-      if (settings?.maintenance_mode) {
-        const admin = await getAdmin();
-        if (!admin || admin.user_id !== userId) {
-          await deleteMessage(chatId, msg.message_id);
-          return sendMessage(chatId, '🔧 <b>Bot is under maintenance</b>\n\nPlease try again later.');
-        }
+      const admin = await getAdmin();
+      const isAdmin = admin && admin.user_id === userId;
+      if (settings?.maintenance_mode && !isAdmin) {
+        await deleteMessage(chatId, msg.message_id);
+        return sendMessage(chatId, '🔧 <b>Bot is under maintenance</b>\n\nPlease try again later.');
+      }
+
+      // Banned user check
+      const existingUser = await getUser(userId);
+      if (existingUser?.is_banned) {
+        await deleteMessage(chatId, msg.message_id);
+        return sendMessage(chatId, '🚫 <b>You have been banned from using this bot.</b>');
       }
 
       // Commands
@@ -110,8 +132,8 @@ async function handleChannelMember(update) {
     const chatUsername = update.chat?.username;
 
     // Main channel join
-    if (chatUsername === process.env.BOT_USERNAME?.replace('Bot', 'Updates') ||
-        chatUsername === 'CrevioUpdates') {
+    const mainChannelUsername = process.env.MAIN_CHANNEL?.replace('@', '');
+    if (chatUsername && mainChannelUsername && chatUsername.toLowerCase() === mainChannelUsername.toLowerCase()) {
       if (['member', 'administrator', 'creator'].includes(status)) {
         const user = await getUser(userId);
         if (!user) return;
@@ -119,7 +141,7 @@ async function handleChannelMember(update) {
         if (session?.current_step === 'waiting_channel_join') {
           await clearUserSession(userId);
           const { showMenu } = require('./user/start');
-          return showMenu(chatId, userId, user, session.data?.param);
+          return showMenu(userId, userId, user, session.data?.param);
         }
       }
       return;
@@ -138,7 +160,7 @@ async function handleChannelMember(update) {
           await sendMessage(admin.user_id,
             `⚠️ <b>Member Left Channel!</b>\n━━━━━━━━━━━━━━━━━━\n` +
             `👤 <b>User ID:</b> <code>${userId}</code>\n` +
-            `📢 <b>Channel:</b> ${channel?.channelName || chatId}`
+            `📢 <b>Channel:</b> ${channel?.channel_name || chatId}`
           );
         }
       }

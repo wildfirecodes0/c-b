@@ -13,10 +13,12 @@ async function handleInlineQuery(query) {
     }
     const results = await Promise.all(channels.map(async (ch) => {
       const planCount = await d1First('SELECT COUNT(*) as c FROM plans WHERE channel_id=? AND is_active=1',[ch.channel_id]);
+      const creatorInfo = await d1First('SELECT is_verified FROM creators WHERE user_id=?', [ch.creator_user_id]);
+      const badge = creatorInfo?.is_verified ? ' ✅' : '';
       return {
-        type:'article', id:`channel_${ch.channel_id}`, title:ch.channel_name,
+        type:'article', id:`channel_${ch.channel_id}`, title:ch.channel_name + badge,
         description:`👥 ${ch.total_members} members • 📋 ${planCount?.c||0} plans${ch.category?` • ${ch.category}`:''}`,
-        input_message_content:{ message_text:`📢 <b>${ch.channel_name}</b>\n\n👥 <b>Members:</b> ${ch.total_members}\n🌐 <b>Type:</b> ${ch.type}\n${ch.category?`🏷 <b>Category:</b> ${ch.category}\n`:''}\nTap below to view plans and join!`, parse_mode:'HTML' },
+        input_message_content:{ message_text:`📢 <b>${ch.channel_name}${badge}</b>\n\n👥 <b>Members:</b> ${ch.total_members}\n🌐 <b>Type:</b> ${ch.type}\n${ch.category?`🏷 <b>Category:</b> ${ch.category}\n`:''}\nTap below to view plans and join!`, parse_mode:'HTML' },
         reply_markup:{ inline_keyboard:[[{text:'💎 View Plans & Join', url:`https://t.me/${process.env.BOT_USERNAME}?start=join_${ch.channel_id}`}]] }
       };
     }));

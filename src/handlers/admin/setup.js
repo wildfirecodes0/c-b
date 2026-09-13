@@ -187,8 +187,21 @@ async function showAdminSettings(chatId, userId, msgId) {
   const settings = await getBotSettings();
   return editMessage(chatId,msgId,
     `<b>⚙️ Admin Settings</b>\n━━━━━━━━━━━━━━━━━━\n🤖 <b>Bot Status:</b> ${settings?.maintenance_mode?'🔧 Maintenance':'✅ Online'}\n💰 <b>Platform Fee:</b> ₹${(settings?.platform_fee||4900)/100}/channel\n📊 <b>Commission:</b> ${settings?.commission_percent||5}%\n🛡 <b>Maintenance Mode:</b> ${settings?.maintenance_mode?'✅ On':'❌ Off'}\n📦 <b>Bot Version:</b> ${settings?.bot_version||'1.0.0'}`,
-    {reply_markup:inlineKeyboard([[cbButton('💰 Change Platform Fee','admin_change_fee')],[cbButton('📊 Change Commission %','admin_change_commission')],[cbButton('🛡 Toggle Maintenance','admin_toggle_maintenance')],[cbButton('🔙 Back','admin_menu')]])}
+    {reply_markup:inlineKeyboard([[cbButton('💰 Change Platform Fee','admin_change_fee')],[cbButton('📊 Change Commission %','admin_change_commission')],[cbButton('🎟 Promo Codes','admin_promo_codes')],[cbButton('🛡 Toggle Maintenance','admin_toggle_maintenance')],[cbButton('🔙 Back','admin_menu')]])}
   );
+}
+
+async function showAdminPromoCodes(chatId, userId, msgId) {
+  const codes = await d1All('SELECT * FROM promo_codes ORDER BY created_at DESC LIMIT 20');
+  let text = `<b>🎟 Promo Codes</b>\n━━━━━━━━━━━━━━━━━━\n`;
+  if (!codes.length) text += `<i>No promo codes yet.</i>`;
+  else {
+    text += codes.map(c => {
+      const val = c.discount_type === 'percent' ? `${c.discount_value}%` : c.discount_type === 'flat' ? `₹${c.discount_value/100}` : 'Free';
+      return `🎟 <code>${c.code}</code> — ${val} off ${c.is_active ? '✅' : '🚫'}\n   Used: ${c.used_count}${c.max_uses ? `/${c.max_uses}` : ''}${c.expires_at ? ` • Expires ${formatDate(c.expires_at)}` : ''}`;
+    }).join('\n\n');
+  }
+  return editMessage(chatId, msgId, text, { reply_markup: inlineKeyboard([[cbButton('➕ Create New', 'admin_promo_create')], [cbButton('🔙 Back', 'admin_settings')]]) });
 }
 
 async function toggleMaintenance(chatId, userId, msgId) {
@@ -208,4 +221,4 @@ async function downloadAdminTransactionsPDF(chatId, userId) {
   await sendDocument(chatId, Buffer.from(html), 'Crevio_Admin_Transactions.html', '📊 <b>Admin Transaction Report</b>');
 }
 
-module.exports = { handleAdminCommand, showAdminCreators, showAdminCreatorDetail, showAdminUsers, showAdminUserDetail, banUser, unbanUser, showAdminChannels, showAdminChannelDetail, showAdminTransactions, showAdminTxnDetail, downloadAdminTransactionsPDF, showAdminRevenue, showAdminBroadcast, showAdminSettings, toggleMaintenance };
+module.exports = { handleAdminCommand, showAdminCreators, showAdminCreatorDetail, showAdminUsers, showAdminUserDetail, banUser, unbanUser, showAdminChannels, showAdminChannelDetail, showAdminTransactions, showAdminTxnDetail, downloadAdminTransactionsPDF, showAdminRevenue, showAdminBroadcast, showAdminSettings, showAdminPromoCodes, toggleMaintenance };

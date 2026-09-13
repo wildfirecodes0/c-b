@@ -5,11 +5,15 @@ const { sendMessage, editMessage, sendDocument, inlineKeyboard, urlButton, cbBut
 const { formatDate } = require('../../utils/crypto');
 
 async function showUserMenu(chatId, userId, msgId = null) {
+  const { getCreator } = require('../../db/index');
+  const creator = await getCreator(userId);
   const text = `✨ <b>Crevio Bot</b> — Choose an option 👇`;
   const kb = inlineKeyboard([
     [cbButton('💎 My Memberships', 'user_memberships'), cbButton('🧾 Transactions', 'user_transactions')],
     [cbButton('🎁 Refer & Earn', 'user_refer'), cbButton('👤 Profile', 'user_profile')],
-    [cbButton('🚀 Become a Creator', 'user_become_creator')],
+    creator?.onboarding_complete
+      ? [cbButton('📊 Creator Dashboard', 'creator_dashboard')]
+      : [cbButton('🚀 Become a Creator', 'user_become_creator')],
     [cbButton('❓ Support', 'user_support')],
   ]);
   if (msgId) return editMessage(chatId, msgId, text, { reply_markup: kb });
@@ -137,8 +141,8 @@ async function showReferEarn(chatId, userId, msgId) {
 
 async function showSupport(chatId, userId, msgId) {
   return editMessage(chatId, msgId,
-    `<b>❓ Support & Help</b>\n━━━━━━━━━━━━━━━━━━\nHow can we help you today?\n\n💬 <i>Chat with our support team</i>\n🎫 <i>Raise a support ticket</i>\n📖 <i>Browse FAQs</i>`,
-    { reply_markup: inlineKeyboard([[urlButton('💬 Chat Support', 'https://t.me/RaushanKakhaura'), cbButton('🎫 Raise a Ticket', 'support_raise_ticket')], [cbButton('📖 FAQ', 'support_faq')], [cbButton('🔙 Back', 'main_menu')]]) }
+    `<b>❓ Support & Help</b>\n━━━━━━━━━━━━━━━━━━\nHow can we help you today?\n\n💬 <i>Chat with our support team</i>\n🎫 <i>Raise a support ticket</i>\n🔍 <i>Track an existing ticket</i>\n📖 <i>Browse FAQs</i>`,
+    { reply_markup: inlineKeyboard([[urlButton('💬 Chat Support', 'https://t.me/RaushanKakhaura'), cbButton('🎫 Raise a Ticket', 'support_raise_ticket')], [cbButton('🔍 Track a Ticket', 'support_track_ticket_start')], [cbButton('📖 FAQ', 'support_faq')], [cbButton('🔙 Back', 'main_menu')]]) }
   );
 }
 

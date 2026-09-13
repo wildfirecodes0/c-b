@@ -29,7 +29,9 @@ async function showChannelPlans(chatId, userId, channelId, msgId = null) {
 
   const trialPlan = plans.find(p => p.trial_days > 0);
   const trialUsed = trialPlan ? await hasUsedTrial(userId, channelId) : true;
-  const channelDisplay = channel.username ? `@${channel.username}` : channel.channel_name;
+  const creatorInfo = await getCreator(channel.creator_user_id);
+  const badge = creatorInfo?.is_verified ? ' ✅' : '';
+  const channelDisplay = (channel.username ? `@${channel.username}` : channel.channel_name) + badge;
 
   let text = `<b>💎 ${channelDisplay} — Choose a Plan</b>\n━━━━━━━━━━━━━━━━━━\n👥 <b>Members:</b> ${channel.total_members}\n`;
   if (channel.category) text += `🏷 <b>Category:</b> ${channel.category}\n`;
@@ -54,7 +56,7 @@ async function showChannelPlans(chatId, userId, channelId, msgId = null) {
 
 // ---- SHOW PAYMENT METHODS ----
 async function showPaymentMethods(chatId, userId, planId, msgId) {
-  
+
   const plan = await require('../../db/d1').d1First('SELECT * FROM plans WHERE id=?',[planId]);
   if (!plan) return;
   const channel = await getChannel(plan.channel_id);
@@ -63,15 +65,24 @@ async function showPaymentMethods(chatId, userId, planId, msgId) {
   const hasRazorpay = creator?.razorpay_key || creator?.use_default_razorpay;
   const hasTrx = !!creator?.trx_wallet;
 
+  const { getUserSession } = require('../../db/index');
+  const session = await getUserSession(userId);
+  const applied = session?.current_step === 'coupon_applied' && session.data?.planId === planId ? session.data : null;
+  const finalPrice = applied ? (plan.price - applied.discountAmount) : plan.price;
+
   const text =
     `<b>💳 Complete Payment</b>\n━━━━━━━━━━━━━━━━━━\n` +
     `📢 <b>Channel:</b> ${channelDisplay}\n` +
     `💎 <b>Plan:</b> ${plan.plan_type}\n` +
-    `💰 <b>Amount:</b> ₹${plan.price / 100}\n\nChoose payment method:`;
+    (applied
+      ? `💰 <b>Price:</b> <s>₹${plan.price / 100}</s> ➜ <b>₹${finalPrice / 100}</b>\n🎟 <b>Code Applied:</b> <code>${applied.couponCode}</code>\n\n`
+      : `💰 <b>Amount:</b> ₹${plan.price / 100}\n\n`) +
+    `Choose payment method:`;
 
   const buttons = [];
   if (hasRazorpay) buttons.push([cbButton('💳 Pay via Razorpay', `pay_razorpay_${planId}`)]);
   if (hasTrx) buttons.push([cbButton('🪙 Pay via TRX (USDT)', `pay_trx_${planId}`)]);
+  if (!applied) buttons.push([cbButton('🎟 Apply Coupon Code', `apply_coupon_${planId}`)]);
   buttons.push([cbButton('🔙 Back', `join_${plan.channel_id}`)]);
 
   return editMessage(chatId, msgId, text, { reply_markup: inlineKeyboard(buttons) });
@@ -79,11 +90,16 @@ async function showPaymentMethods(chatId, userId, planId, msgId) {
 
 // ---- INIT RAZORPAY PAYMENT ----
 async function initRazorpayPayment(chatId, userId, planId, msgId) {
-  
+
   const plan = await require('../../db/d1').d1First('SELECT * FROM plans WHERE id=?',[planId]);
   if (!plan) return;
   const channel = await getChannel(plan.channel_id);
   const creator = await getCreator(plan.creator_user_id);
+
+  const { getUserSession } = require('../../db/index');
+  const session = await getUserSession(userId);
+  const applied = session?.current_step === 'coupon_applied' && session.data?.planId === planId ? session.data : null;
+  const finalAmount = applied ? Math.max(0, plan.price - applied.discountAmount) : plan.price;
 
   let razorpayKey, razorpaySecret;
   if (creator?.use_default_razorpay || !creator?.razorpay_key) {
@@ -95,7 +111,7 @@ async function initRazorpayPayment(chatId, userId, planId, msgId) {
   }
 
   const sessionId = generateToken(16);
-  const expiresAt = Date.now() + 5 * 60 * 1000;
+  const expiresAt = Date.now() + 20 * 60 * 1000; // Razorpay requires expire_by to be at least 15 min ahead
 
   // Create Razorpay payment link
   let linkRes;
@@ -108,7 +124,7 @@ async function initRazorpayPayment(chatId, userId, planId, msgId) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        amount: plan.price,
+        amount: finalAmount,
         currency: 'INR',
         description: `${channel?.channel_name} — ${plan.plan_type} Plan`,
         expire_by: Math.floor(expiresAt / 1000),
@@ -131,6 +147,7 @@ async function initRazorpayPayment(chatId, userId, planId, msgId) {
   }
 
   if (!linkRes?.id) {
+    console.error('Razorpay link creation returned no id:', JSON.stringify(linkRes));
     return editMessage(chatId, msgId, `❌ <b>Payment link creation failed!</b>\n\nPlease try again.`,
       { reply_markup: inlineKeyboard([[cbButton('🔄 Try Again', `select_plan_${planId}`)]]) });
   }
@@ -141,19 +158,22 @@ async function initRazorpayPayment(chatId, userId, planId, msgId) {
     channelId: plan.channel_id,
     planId: plan.id,
     creatorUserId: plan.creator_user_id,
-    amount: plan.price,
+    amount: finalAmount,
     method: 'razorpay',
     razorpayLinkId: linkRes.id,
+    couponCode: applied?.couponCode, couponType: applied?.couponType,
+    couponId: applied?.couponRecordId, discountAmount: applied?.discountAmount || 0,
     expiresAt,
   });
+  if (applied) await clearUserSession(userId);
 
   const channelDisplay = channel?.username ? `@${channel.username}` : channel?.channel_name;
   return editMessage(chatId, msgId,
     `<b>💳 Complete Payment</b>\n━━━━━━━━━━━━━━━━━━\n` +
     `📢 <b>Channel:</b> ${channelDisplay}\n` +
     `💎 <b>Plan:</b> ${plan.plan_type}\n` +
-    `💰 <b>Amount:</b> ₹${plan.price / 100}\n\n` +
-    `⏰ <b>Time Remaining:</b> 05:00\n\n` +
+    (applied ? `💰 <b>Amount:</b> <s>₹${plan.price / 100}</s> ➜ <b>₹${finalAmount / 100}</b> (🎟 ${applied.couponCode})\n\n` : `💰 <b>Amount:</b> ₹${finalAmount / 100}\n\n`) +
+    `⏰ <b>Time Remaining:</b> 20:00\n\n` +
     `⚡ <i>Payment will be detected automatically after completion!</i>`,
     {
       reply_markup: inlineKeyboard([
@@ -177,30 +197,38 @@ async function initTrxPayment(chatId, userId, planId, msgId) {
       { reply_markup: inlineKeyboard([[cbButton('🔙 Back', `select_plan_${planId}`)]]) });
   }
 
+  const { getUserSession } = require('../../db/index');
+  const session = await getUserSession(userId);
+  const applied = session?.current_step === 'coupon_applied' && session.data?.planId === planId ? session.data : null;
+  const finalAmount = applied ? Math.max(0, plan.price - applied.discountAmount) : plan.price;
+
   const usdtRate = await getUSDTRate();
-  const amountUsdt = (plan.price / 100 / usdtRate).toFixed(2);
+  const amountUsdt = (finalAmount / 100 / usdtRate).toFixed(2);
   const sessionId = generateToken(16);
-  const expiresAt = Date.now() + 5 * 60 * 1000;
+  const expiresAt = Date.now() + 20 * 60 * 1000; // Keep the same generous window as Razorpay for consistency
 
   await createPaymentSession({
     sessionId, userId,
     channelId: plan.channel_id,
     planId: plan.id,
     creatorUserId: plan.creator_user_id,
-    amount: plan.price,
+    amount: finalAmount,
     method: 'trx',
     trxWallet: creator.trx_wallet,
     trxAmountUsdt: parseFloat(amountUsdt),
+    couponCode: applied?.couponCode, couponType: applied?.couponType,
+    couponId: applied?.couponRecordId, discountAmount: applied?.discountAmount || 0,
     expiresAt,
   });
+  if (applied) await clearUserSession(userId);
 
   const channelDisplay = channel?.username ? `@${channel.username}` : channel?.channel_name;
   return editMessage(chatId, msgId,
     `<b>🪙 TRX Payment</b>\n━━━━━━━━━━━━━━━━━━\n` +
     `📢 <b>Channel:</b> ${channelDisplay}\n` +
-    `💰 <b>Amount:</b> <code>${amountUsdt} USDT</code> (TRC20)\n\n` +
+    (applied ? `💰 <b>Amount:</b> <code>${amountUsdt} USDT</code> (🎟 ${applied.couponCode} applied)\n\n` : `💰 <b>Amount:</b> <code>${amountUsdt} USDT</code> (TRC20)\n\n`) +
     `Send USDT to this address:\n<code>${creator.trx_wallet}</code>\n\n` +
-    `⏰ <b>Time Remaining:</b> 05:00\n\n` +
+    `⏰ <b>Time Remaining:</b> 20:00\n\n` +
     `⏳ <i>Payment will be auto-detected within 30 seconds after confirmation!</i>\n\n` +
     `⚠️ <i>Send exact amount only.</i>`,
     { reply_markup: inlineKeyboard([[cbButton('🔙 Back', `select_plan_${planId}`)]]) }

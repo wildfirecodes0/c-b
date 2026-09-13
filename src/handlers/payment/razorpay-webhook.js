@@ -94,6 +94,11 @@ async function processSuccessfulPayment(session, paymentData, method) {
       expiresAt,
     });
 
+    if (session.coupon_id && session.coupon_type) {
+      const { recordCodeUsage } = require('../../db/index');
+      await recordCodeUsage(session.coupon_type, session.coupon_id, session.user_id);
+    }
+
     const txnId = `TXN${now}${session.user_id}`;
     const commission = Math.floor(session.amount * 0.05);
     await createTransaction({
@@ -145,8 +150,10 @@ async function processSuccessfulPayment(session, paymentData, method) {
     }
 
     if (user.referred_by) {
-      await handleReferralReward(user.referred_by);
-      await sendMessage(user.referred_by, `🎁 <b>Referral Reward!</b>\n\nYour friend subscribed! You earned <b>1 free day</b> 🎉`);
+      const rewarded = await handleReferralReward(user.referred_by, user.user_id);
+      if (rewarded) {
+        await sendMessage(user.referred_by, `🎁 <b>Referral Reward!</b>\n\nYour friend subscribed! You earned <b>1 free day</b> 🎉`);
+      }
     }
   } catch (err) {
     console.error('processSuccessfulPayment error:', err.message);

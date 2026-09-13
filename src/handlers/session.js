@@ -17,6 +17,108 @@ async function handleSessionInput(msg, session) {
     return handleChannelInput(msg, session);
   }
 
+  if (step === 'admin_promo_code') {
+    const code = text.trim().toUpperCase();
+    if (!/^[A-Z0-9]{3,20}$/.test(code)) {
+      return editMessage(chatId, msgId, `❌ <b>Invalid code!</b> Use 3-20 letters/numbers only.`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'admin_promo_codes')]]) });
+    }
+    const existing = await d1First('SELECT id FROM promo_codes WHERE code = ?', [code]);
+    if (existing) {
+      return editMessage(chatId, msgId, `❌ <b>Code already exists!</b> Try a different one:`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'admin_promo_codes')]]) });
+    }
+    await setUserSession(userId, 'admin_promo_type_pending', { code }, msgId);
+    return editMessage(chatId, msgId, `✅ Code: <code>${code}</code>\n\n<b>Choose discount type:</b>`,
+      { reply_markup: inlineKeyboard([[cbButton('% Percentage', 'promo_type_percent'), cbButton('₹ Flat Amount', 'promo_type_flat')], [cbButton('🔙 Cancel', 'admin_promo_codes')]]) });
+  }
+
+  if (step === 'admin_promo_value') {
+    const value = parseInt(text);
+    if (isNaN(value) || value < 1) return editMessage(chatId, msgId, `❌ <b>Invalid value!</b> Enter a number:`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'admin_promo_codes')]]) });
+    await setUserSession(userId, 'admin_promo_maxuses', { ...data, value }, msgId);
+    return editMessage(chatId, msgId, `✅ Value saved!\n\n👥 <b>Max total uses?</b>\n📌 <i>Enter 0 for unlimited</i>`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'admin_promo_codes')]]) });
+  }
+
+  if (step === 'admin_promo_maxuses') {
+    const maxUses = parseInt(text);
+    if (isNaN(maxUses) || maxUses < 0) return editMessage(chatId, msgId, `❌ Invalid! Enter 0 or more:`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'admin_promo_codes')]]) });
+    await setUserSession(userId, 'admin_promo_expiry', { ...data, maxUses }, msgId);
+    return editMessage(chatId, msgId, `✅ Saved!\n\n📅 <b>Expires in how many days?</b>\n📌 <i>Enter 0 for never</i>`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'admin_promo_codes')]]) });
+  }
+
+  if (step === 'admin_promo_expiry') {
+    const days = parseInt(text);
+    if (isNaN(days) || days < 0) return editMessage(chatId, msgId, `❌ Invalid! Enter 0 or more:`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'admin_promo_codes')]]) });
+    const now = Date.now();
+    const discountValue = data.type === 'percent' ? data.value : data.value * 100;
+    await d1Run(
+      `INSERT INTO promo_codes (code, discount_type, discount_value, max_uses, expires_at, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [data.code, data.type, discountValue, data.maxUses || null, days > 0 ? now + days * 86400000 : null, userId, now, now]
+    );
+    await clearUserSession(userId);
+    return editMessage(chatId, msgId,
+      `✅ <b>Promo Code Created!</b>\n\n🎟 <code>${data.code}</code>\n💰 ${data.type === 'percent' ? `${data.value}% off` : `₹${data.value} off`}\n👥 Max uses: ${data.maxUses || 'Unlimited'}\n📅 Expires: ${days > 0 ? `${days} days` : 'Never'}`,
+      { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'admin_promo_codes')]]) });
+  }
+
+  if (step === 'creator_coupon_code') {
+    const code = text.trim().toUpperCase();
+    if (!/^[A-Z0-9]{3,20}$/.test(code)) {
+      return editMessage(chatId, msgId, `❌ <b>Invalid code!</b> Use 3-20 letters/numbers only.`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'creator_coupons')]]) });
+    }
+    const existing = await d1First('SELECT id FROM coupons WHERE code = ?', [code]);
+    if (existing) {
+      return editMessage(chatId, msgId, `❌ <b>Code already exists!</b> Try a different one:`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'creator_coupons')]]) });
+    }
+    await setUserSession(userId, 'creator_coupon_type_pending', { ...data, code }, msgId);
+    return editMessage(chatId, msgId, `✅ Code: <code>${code}</code>\n\n<b>Choose discount type:</b>`,
+      { reply_markup: inlineKeyboard([[cbButton('% Percentage', 'coupon_type_percent'), cbButton('₹ Flat Amount', 'coupon_type_flat')], [cbButton('🔙 Cancel', 'creator_coupons')]]) });
+  }
+
+  if (step === 'creator_coupon_value') {
+    const value = parseInt(text);
+    if (isNaN(value) || value < 1) return editMessage(chatId, msgId, `❌ <b>Invalid value!</b> Enter a number:`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'creator_coupons')]]) });
+    await setUserSession(userId, 'creator_coupon_maxuses', { ...data, value }, msgId);
+    return editMessage(chatId, msgId, `✅ Value saved!\n\n👥 <b>Max total uses?</b>\n📌 <i>Enter 0 for unlimited</i>`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'creator_coupons')]]) });
+  }
+
+  if (step === 'creator_coupon_maxuses') {
+    const maxUses = parseInt(text);
+    if (isNaN(maxUses) || maxUses < 0) return editMessage(chatId, msgId, `❌ Invalid! Enter 0 or more:`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'creator_coupons')]]) });
+    await setUserSession(userId, 'creator_coupon_expiry', { ...data, maxUses }, msgId);
+    return editMessage(chatId, msgId, `✅ Saved!\n\n📅 <b>Expires in how many days?</b>\n📌 <i>Enter 0 for never</i>`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'creator_coupons')]]) });
+  }
+
+  if (step === 'creator_coupon_expiry') {
+    const days = parseInt(text);
+    if (isNaN(days) || days < 0) return editMessage(chatId, msgId, `❌ Invalid! Enter 0 or more:`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'creator_coupons')]]) });
+    const now = Date.now();
+    const discountValue = data.type === 'percent' ? data.value : data.value * 100;
+    await d1Run(
+      `INSERT INTO coupons (code, creator_user_id, channel_id, discount_type, discount_value, max_uses, expires_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [data.code, userId, data.channelId, data.type, discountValue, data.maxUses || null, days > 0 ? now + days * 86400000 : null, now, now]
+    );
+    await clearUserSession(userId);
+    return editMessage(chatId, msgId,
+      `✅ <b>Coupon Created!</b>\n\n🎟 <code>${data.code}</code>\n💰 ${data.type === 'percent' ? `${data.value}% off` : `₹${data.value} off`}\n👥 Max uses: ${data.maxUses || 'Unlimited'}\n📅 Expires: ${days > 0 ? `${days} days` : 'Never'}`,
+      { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'creator_coupons')]]) });
+  }
+
+  if (step === 'enter_coupon_code') {
+    const { validateDiscountCode } = require('../db/index');
+    const plan = await d1First('SELECT * FROM plans WHERE id=?', [data.planId]);
+    if (!plan) return editMessage(chatId, msgId, `❌ <b>Plan not found.</b>`, { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'main_menu')]]) });
+    const result = await validateDiscountCode(text, plan);
+    if (!result.valid) {
+      return editMessage(chatId, msgId, `❌ <b>${result.reason}</b>\n\nTry another code:`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', `select_plan_${data.planId}`)]]) });
+    }
+    await setUserSession(userId, 'coupon_applied', {
+      planId: data.planId, couponCode: text.trim().toUpperCase(), couponType: result.type,
+      couponRecordId: result.record.id, discountAmount: result.discountAmount,
+    }, msgId);
+    const { showPaymentMethods } = require('./payment/plans');
+    return showPaymentMethods(chatId, userId, data.planId, msgId);
+  }
+
   if (step === 'creator_enter_razorpay_key') {
     if (!text?.startsWith('rzp_')) return editMessage(chatId, msgId, `❌ <b>Invalid Key ID!</b>\n\nMust start with <code>rzp_live_</code>\n\nPlease enter again:`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'creator_settings')]]) });
     await setUserSession(userId, 'creator_enter_razorpay_secret', { ...data, razorpayKey: text }, msgId);
@@ -86,32 +188,118 @@ async function handleSessionInput(msg, session) {
   }
 
   if (step === 'admin_broadcast_message') {
-    const { sendMessage: tgSend } = require('../utils/telegram');
+    const { sendMessage: tgSend, extractMedia, sendMediaByFileId } = require('../utils/telegram');
+    const { mediaType, fileId } = extractMedia(msg);
+    const messageText = text || msg.caption || null;
+    if (!messageText && !mediaType) {
+      return editMessage(chatId, msgId, `❌ <b>Please send a text message or attach media.</b>`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'admin_menu')]]) });
+    }
     const target = data.target;
     let rows = [];
     if (target === 'all_users') rows = await d1All('SELECT user_id FROM users WHERE is_banned=0');
     else if (target === 'all_creators') rows = await d1All('SELECT user_id FROM creators');
     else if (target === 'all_members') rows = await d1All("SELECT DISTINCT user_id FROM subscriptions WHERE status='active'");
     await clearUserSession(userId);
+    const caption = `📣 <b>Announcement</b>\n━━━━━━━━━━━━━━━━━━\n${messageText || ''}`;
     let sent=0, failed=0;
     for (const row of rows) {
-      try { await tgSend(row.user_id, `📣 <b>Announcement</b>\n━━━━━━━━━━━━━━━━━━\n${text}`); sent++; } catch { failed++; }
+      try {
+        if (mediaType) await sendMediaByFileId(row.user_id, mediaType, fileId, caption);
+        else await tgSend(row.user_id, caption);
+        sent++;
+      } catch { failed++; }
+      await new Promise(r => setTimeout(r, 40)); // stay comfortably under Telegram's rate limits
     }
     return editMessage(chatId, msgId, `✅ <b>Broadcast Sent!</b>\n\n📤 <b>Sent:</b> ${sent}\n❌ <b>Failed:</b> ${failed}`, { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'admin_menu')]]) });
   }
 
   if (step === 'support_ticket_subject') {
     await setUserSession(userId, 'support_ticket_message', { ...data, subject: text }, msgId);
-    return editMessage(chatId, msgId, `✅ Subject saved!\n\n💬 <b>Now describe your issue in detail:</b>`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'user_support')]]) });
+    return editMessage(chatId, msgId, `✅ Subject saved!\n\n💬 <b>Now describe your issue in detail.</b>\n📎 <i>You can also attach a photo, video, voice note, or document.</i>`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'user_support')]]) });
   }
 
   if (step === 'support_ticket_message') {
-    const { createTicket } = require('../db/index');
-    const ticketId = await createTicket({ userId, subject: data.subject, message: text });
+    const { createTicket, getUser } = require('../db/index');
+    const { extractMedia, sendMediaByFileId } = require('../utils/telegram');
+    const { mediaType, fileId } = extractMedia(msg);
+    const messageText = text || msg.caption || null;
+    if (!messageText && !mediaType) {
+      return editMessage(chatId, msgId, `❌ <b>Please send a text message or attach media describing your issue.</b>`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'user_support')]]) });
+    }
+    const ticketId = await createTicket({ userId, subject: data.subject, message: messageText, mediaType, mediaFileId: fileId });
     await clearUserSession(userId);
     const admin = await getAdmin();
-    if (admin) await sendMessage(admin.user_id, `🎫 <b>New Support Ticket!</b>\n━━━━━━━━━━━━━━━━━━\n🆔 <b>Ticket:</b> <code>${ticketId}</code>\n👤 <b>User ID:</b> <code>${userId}</code>\n📋 <b>Subject:</b> ${data.subject}`);
-    return editMessage(chatId, msgId, `✅ <b>Ticket Submitted!</b>\n\n🆔 <b>Ticket ID:</b> <code>${ticketId}</code>\n\nWe'll get back to you soon!`, { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'user_support')]]) });
+    const user = await getUser(userId);
+    if (admin) {
+      const header = `🎫 <b>New Support Ticket!</b>\n━━━━━━━━━━━━━━━━━━\n🆔 <b>Ticket:</b> <code>${ticketId}</code>\n👤 <b>From:</b> ${user?.full_name} (<code>${userId}</code>)\n📋 <b>Subject:</b> ${data.subject}\n📅 <b>Date:</b> ${formatDate(Date.now())}\n\n💬 <b>Message:</b>\n${messageText || '<i>(see attachment above)</i>'}`;
+      const kb = inlineKeyboard([[cbButton('↩️ Reply', `ticket_reply_${ticketId}`), cbButton('🔒 Close Ticket', `ticket_close_${ticketId}`)]]);
+      if (mediaType) await sendMediaByFileId(admin.user_id, mediaType, fileId, `🎫 Attachment — Ticket ${ticketId}`);
+      await sendMessage(admin.user_id, header, { reply_markup: kb });
+    }
+    return editMessage(chatId, msgId,
+      `✅ <b>Ticket Submitted!</b>\n\n🆔 <b>Ticket ID:</b> <code>${ticketId}</code>\n\n📌 <i>Save this ID — you can check your ticket status anytime from Support → Track a Ticket.</i>\n\nWe'll get back to you soon!`,
+      { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'user_support')]]) });
+  }
+
+  if (step === 'support_track_ticket') {
+    const { getTicket, getTicketReplies } = require('../db/index');
+    const ticket = await getTicket(text?.trim().toUpperCase());
+    if (!ticket || ticket.user_id !== userId) {
+      return editMessage(chatId, msgId, `❌ <b>Ticket not found!</b>\n\nPlease check the ticket ID and try again.`, { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'user_support')]]) });
+    }
+    await clearUserSession(userId);
+    if (ticket.status === 'closed') {
+      return editMessage(chatId, msgId, `<b>🎫 Ticket ${ticket.ticket_id}</b>\n━━━━━━━━━━━━━━━━━━\n✅ <b>This ticket has been closed.</b>\n\nThank you for reaching out to Crevio Support!`, { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'user_support')]]) });
+    }
+    const replies = await getTicketReplies(ticket.ticket_id);
+    const adminReplies = replies.filter(r => r.sender_role === 'admin');
+    let text2 = `<b>🎫 Ticket ${ticket.ticket_id}</b>\n━━━━━━━━━━━━━━━━━━\n📋 <b>Subject:</b> ${ticket.subject}\n🌐 <b>Status:</b> ${ticket.status === 'open' ? '🟡 Open' : '🔵 In Progress'}\n📅 <b>Raised:</b> ${formatDate(ticket.created_at)}`;
+    if (adminReplies.length) {
+      text2 += `\n\n💬 <b>Latest Reply:</b>\n${adminReplies[adminReplies.length - 1].message || '<i>(media)</i>'}`;
+    } else {
+      text2 += `\n\n<i>No reply yet — our team will get back to you soon.</i>`;
+    }
+    return editMessage(chatId, msgId, text2, { reply_markup: inlineKeyboard([[cbButton('💬 Send Follow-up', `ticket_followup_${ticket.ticket_id}`)], [cbButton('🔙 Back', 'user_support')]]) });
+  }
+
+  if (step === 'user_ticket_followup') {
+    const { addTicketReply, getUser } = require('../db/index');
+    const { extractMedia, sendMediaByFileId } = require('../utils/telegram');
+    const { mediaType, fileId } = extractMedia(msg);
+    const messageText = text || msg.caption || null;
+    if (!messageText && !mediaType) {
+      return editMessage(chatId, msgId, `❌ <b>Please send a text message or media.</b>`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'user_support')]]) });
+    }
+    await addTicketReply({ ticketId: data.ticketId, senderId: userId, senderRole: 'user', message: messageText, mediaType, mediaFileId: fileId });
+    await clearUserSession(userId);
+    const admin = await getAdmin();
+    const user = await getUser(userId);
+    if (admin) {
+      const header = `💬 <b>Ticket Follow-up!</b>\n━━━━━━━━━━━━━━━━━━\n🆔 <b>Ticket:</b> <code>${data.ticketId}</code>\n👤 <b>From:</b> ${user?.full_name} (<code>${userId}</code>)\n📅 ${formatDate(Date.now())}\n\n💬 <b>Message:</b>\n${messageText || '<i>(see attachment above)</i>'}`;
+      const kb = inlineKeyboard([[cbButton('↩️ Reply', `ticket_reply_${data.ticketId}`), cbButton('🔒 Close Ticket', `ticket_close_${data.ticketId}`)]]);
+      if (mediaType) await sendMediaByFileId(admin.user_id, mediaType, fileId, `💬 Attachment — Ticket ${data.ticketId}`);
+      await sendMessage(admin.user_id, header, { reply_markup: kb });
+    }
+    return editMessage(chatId, msgId, `✅ <b>Follow-up sent!</b>`, { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'user_support')]]) });
+  }
+
+  if (step === 'admin_ticket_reply') {
+    const { addTicketReply } = require('../db/index');
+    const { extractMedia, sendMediaByFileId } = require('../utils/telegram');
+    const { mediaType, fileId } = extractMedia(msg);
+    const messageText = text || msg.caption || null;
+    if (!messageText && !mediaType) {
+      return editMessage(chatId, msgId, `❌ <b>Please send a text message or media.</b>`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'admin_menu')]]) });
+    }
+    await addTicketReply({ ticketId: data.ticketId, senderId: userId, senderRole: 'admin', message: messageText, mediaType, mediaFileId: fileId });
+    await clearUserSession(userId);
+    const ticket = await require('../db/index').getTicket(data.ticketId);
+    if (ticket) {
+      const header = `💬 <b>Support Reply</b>\n━━━━━━━━━━━━━━━━━━\n🆔 <b>Ticket:</b> <code>${data.ticketId}</code>\n📋 <b>Subject:</b> ${ticket.subject}\n\n${messageText || ''}`;
+      if (mediaType) await sendMediaByFileId(ticket.user_id, mediaType, fileId, `💬 Reply attachment — Ticket ${data.ticketId}`);
+      await sendMessage(ticket.user_id, header, { reply_markup: inlineKeyboard([[cbButton('💬 Reply Back', `ticket_followup_${data.ticketId}`)]]) });
+    }
+    return editMessage(chatId, msgId, `✅ <b>Reply sent to user!</b>`, { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'admin_menu')]]) });
   }
 
   if (step === 'admin_change_fee') {

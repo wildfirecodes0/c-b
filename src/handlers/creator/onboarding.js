@@ -26,6 +26,12 @@ async function showBecomeCreator(chatId, userId, msgId) {
 
 async function startCreatorSetup(chatId, userId, msgId) {
   let creator = await getCreator(userId);
+  if (creator?.is_suspended) {
+    return editMessage(chatId, msgId,
+      `<b>🚫 Account Suspended</b>\n━━━━━━━━━━━━━━━━━━\n${creator.suspend_reason ? `Reason: ${creator.suspend_reason}\n\n` : ''}You cannot add new channels while your account is suspended. Contact support for help.`,
+      { reply_markup: inlineKeyboard([[cbButton('❓ Contact Support', 'user_support')], [cbButton('🔙 Back', 'main_menu')]]) }
+    );
+  }
   if (!creator) creator = await createCreator(userId);
   await setUserSession(userId, 'creator_setup_channel', {}, msgId);
   return editMessage(chatId, msgId,

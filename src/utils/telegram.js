@@ -71,11 +71,12 @@ async function getBotPermissions(chatId, botId) {
   };
 }
 
-async function sendDocument(chatId, fileBuffer, filename, caption = '') {
+async function sendDocument(chatId, fileBuffer, filename, caption = '', contentType = 'text/html', extra = {}) {
   const form = new FormData();
   form.append('chat_id', String(chatId));
-  form.append('document', fileBuffer, { filename, contentType: 'text/html' });
+  form.append('document', fileBuffer, { filename, contentType });
   if (caption) { form.append('caption', caption); form.append('parse_mode', 'HTML'); }
+  if (extra.reply_markup) form.append('reply_markup', JSON.stringify(extra.reply_markup));
   try {
     const res = await fetch(`${BASE()}/sendDocument`, { method: 'POST', body: form });
     return res.json();
@@ -90,6 +91,33 @@ const inlineKeyboard = (buttons) => ({ inline_keyboard: buttons });
 const urlButton = (text, url) => ({ text, url });
 const cbButton = (text, data) => ({ text, callback_data: data });
 
+const MEDIA_METHOD_MAP = {
+  photo: { method: 'sendPhoto', field: 'photo' },
+  video: { method: 'sendVideo', field: 'video' },
+  document: { method: 'sendDocument', field: 'document' },
+  voice: { method: 'sendVoice', field: 'voice' },
+  audio: { method: 'sendAudio', field: 'audio' },
+  animation: { method: 'sendAnimation', field: 'animation' },
+};
+
+// Re-sends an already-uploaded Telegram file by its file_id (no re-upload needed).
+async function sendMediaByFileId(chatId, mediaType, fileId, caption = '', extra = {}) {
+  const map = MEDIA_METHOD_MAP[mediaType];
+  if (!map) return sendMessage(chatId, caption, extra);
+  return callTG(map.method, { chat_id: chatId, [map.field]: fileId, caption, parse_mode: 'HTML', ...extra });
+}
+
+// Extracts { mediaType, fileId } from an incoming Telegram message, if any.
+function extractMedia(msg) {
+  if (msg.photo?.length) return { mediaType: 'photo', fileId: msg.photo[msg.photo.length - 1].file_id };
+  if (msg.video) return { mediaType: 'video', fileId: msg.video.file_id };
+  if (msg.document) return { mediaType: 'document', fileId: msg.document.file_id };
+  if (msg.voice) return { mediaType: 'voice', fileId: msg.voice.file_id };
+  if (msg.audio) return { mediaType: 'audio', fileId: msg.audio.file_id };
+  if (msg.animation) return { mediaType: 'animation', fileId: msg.animation.file_id };
+  return { mediaType: null, fileId: null };
+}
+
 module.exports = {
   sendMessage, editMessage, deleteMessage,
   answerCallback, getChatMember, getChat,
@@ -97,4 +125,5 @@ module.exports = {
   createInviteLink, answerInlineQuery,
   getBotPermissions, sendDocument,
   inlineKeyboard, urlButton, cbButton,
+  sendMediaByFileId, extractMedia,
 };
