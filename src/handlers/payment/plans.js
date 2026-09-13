@@ -1,5 +1,5 @@
 'use strict';
-const { getChannel, getChannelPlans, getSubscription, hasUsedTrial, getCreator, createPaymentSession, getUSDTRate } = require('../../db/index');
+const { getChannel, getChannelPlans, getSubscription, hasUsedTrial, getCreator, createPaymentSession, getUSDTRate, clearUserSession } = require('../../db/index');
 const { sendMessage, editMessage, inlineKeyboard, cbButton, urlButton, createInviteLink } = require('../../utils/telegram');
 const { generateToken, formatDate } = require('../../utils/crypto');
 const { decrypt } = require('../../utils/crypto');
