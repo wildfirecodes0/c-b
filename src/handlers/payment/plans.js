@@ -111,7 +111,7 @@ async function initRazorpayPayment(chatId, userId, planId, msgId) {
   }
 
   const sessionId = generateToken(16);
-  const expiresAt = Date.now() + 20 * 60 * 1000; // Razorpay requires expire_by to be at least 15 min ahead
+  const expiresAt = Date.now() + 30 * 60 * 1000; // 30 min — safely above Razorpay's 15 min minimum
 
   // Create Razorpay payment link
   let linkRes;
@@ -141,14 +141,15 @@ async function initRazorpayPayment(chatId, userId, planId, msgId) {
     });
     linkRes = await res.json();
   } catch (err) {
-    console.error('Razorpay link error:', err);
+    console.error('Razorpay link fetch error:', err.message);
     return editMessage(chatId, msgId, `❌ <b>Payment link creation failed!</b>\n\nPlease try again.`,
       { reply_markup: inlineKeyboard([[cbButton('🔄 Try Again', `select_plan_${planId}`)]]) });
   }
 
   if (!linkRes?.id) {
-    console.error('Razorpay link creation returned no id:', JSON.stringify(linkRes));
-    return editMessage(chatId, msgId, `❌ <b>Payment link creation failed!</b>\n\nPlease try again.`,
+    console.error('Razorpay API error:', JSON.stringify(linkRes));
+    const reason = linkRes?.error?.description || linkRes?.error?.code || 'Unknown error';
+    return editMessage(chatId, msgId, `❌ <b>Payment link creation failed!</b>\n\n<i>${reason}</i>\n\nPlease try again.`,
       { reply_markup: inlineKeyboard([[cbButton('🔄 Try Again', `select_plan_${planId}`)]]) });
   }
 
@@ -205,7 +206,7 @@ async function initTrxPayment(chatId, userId, planId, msgId) {
   const usdtRate = await getUSDTRate();
   const amountUsdt = (finalAmount / 100 / usdtRate).toFixed(2);
   const sessionId = generateToken(16);
-  const expiresAt = Date.now() + 20 * 60 * 1000; // Keep the same generous window as Razorpay for consistency
+  const expiresAt = Date.now() + 30 * 60 * 1000; // 30 min window
 
   await createPaymentSession({
     sessionId, userId,
@@ -224,13 +225,16 @@ async function initTrxPayment(chatId, userId, planId, msgId) {
 
   const channelDisplay = channel?.username ? `@${channel.username}` : channel?.channel_name;
   return editMessage(chatId, msgId,
-    `<b>🪙 TRX Payment</b>\n━━━━━━━━━━━━━━━━━━\n` +
+    `<b>🪙 TRX / USDT Payment</b>\n━━━━━━━━━━━━━━━━━━\n` +
     `📢 <b>Channel:</b> ${channelDisplay}\n` +
-    (applied ? `💰 <b>Amount:</b> <code>${amountUsdt} USDT</code> (🎟 ${applied.couponCode} applied)\n\n` : `💰 <b>Amount:</b> <code>${amountUsdt} USDT</code> (TRC20)\n\n`) +
-    `Send USDT to this address:\n<code>${creator.trx_wallet}</code>\n\n` +
-    `⏰ <b>Time Remaining:</b> 20:00\n\n` +
+    `💎 <b>Plan:</b> ${plan.plan_type}\n` +
+    (applied
+      ? `💰 <b>Amount:</b> ₹${finalAmount / 100} (<s>₹${plan.price / 100}</s>) = <code>${amountUsdt} USDT</code> (TRC20)\n🎟 <b>Code:</b> ${applied.couponCode}\n\n`
+      : `💰 <b>Amount:</b> ₹${finalAmount / 100} = <code>${amountUsdt} USDT</code> (TRC20)\n\n`) +
+    `📤 <b>Send USDT (TRC20) to:</b>\n<code>${creator.trx_wallet}</code>\n\n` +
+    `⏰ <b>Time Remaining:</b> 30:00\n\n` +
     `⏳ <i>Payment will be auto-detected within 30 seconds after confirmation!</i>\n\n` +
-    `⚠️ <i>Send exact amount only.</i>`,
+    `⚠️ <i>Send exact USDT amount only. Wrong amount = not detected.</i>`,
     { reply_markup: inlineKeyboard([[cbButton('🔙 Back', `select_plan_${planId}`)]]) }
   );
 }

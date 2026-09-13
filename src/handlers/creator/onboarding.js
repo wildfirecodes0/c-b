@@ -192,7 +192,7 @@ async function initPlatformFeePayment(chatId, userId, msgId, method) {
   }
 
   const sessionId = generateToken(16);
-  const expiresAt = Date.now() + 15 * 60 * 1000; // 15 min window for the fee itself
+  const expiresAt = Date.now() + 30 * 60 * 1000; // 30 min — safely above Razorpay's 15 min minimum
 
   return createFeePaymentSession(chatId, userId, msgId, {
     channelId: data.channelId, channelName: data.channelName, planId: plan.id,
@@ -267,13 +267,13 @@ async function createFeePaymentSession(chatId, userId, msgId, opts) {
     });
 
     return editMessage(chatId, msgId,
-      `<b>🪙 TRX Platform Fee Payment</b>\n━━━━━━━━━━━━━━━━━━\n` +
+      `<b>🪙 TRX / USDT Platform Fee Payment</b>\n━━━━━━━━━━━━━━━━━━\n` +
       `📢 <b>Channel:</b> ${channelName}\n` +
-      `💰 <b>Amount:</b> <code>${amountUsdt} USDT</code> (TRC20)\n\n` +
-      `Send USDT to this address:\n<code>${platformWallet}</code>\n\n` +
-      `⏰ <b>Time Remaining:</b> 15:00\n\n` +
+      `💰 <b>Amount:</b> ₹${feeAmount / 100} = <code>${amountUsdt} USDT</code> (TRC20)\n\n` +
+      `📤 <b>Send USDT (TRC20) to:</b>\n<code>${platformWallet}</code>\n\n` +
+      `⏰ <b>Time Remaining:</b> 30:00\n\n` +
       `⏳ <i>Payment will be auto-detected within 30 seconds after confirmation!</i>\n\n` +
-      `⚠️ <i>Send exact amount only.</i>`,
+      `⚠️ <i>Send exact USDT amount only. Wrong amount = not detected.</i>`,
       { reply_markup: inlineKeyboard([[cbButton('🔙 Back', backCbData)]]) }
     );
   }

@@ -82,13 +82,21 @@ async function checkExpiringSubscriptions() {
 
 async function expirePaymentSessions() {
   const now = Date.now();
-  const expired = await d1All("SELECT * FROM payment_sessions WHERE status = 'pending' AND expires_at <= ?", [now]);
+  // Only expire sessions that are ACTUALLY past their expiry time
+  // Use updated_at check to avoid notifying on sessions that were just created
+  const expired = await d1All(
+    "SELECT * FROM payment_sessions WHERE status = 'pending' AND expires_at <= ? AND created_at <= ?",
+    [now, now - 60 * 1000] // must be at least 1 min old to avoid false expiry on fresh sessions
+  );
   for (const s of expired) {
     await d1Run("UPDATE payment_sessions SET status = 'expired', updated_at = ? WHERE session_id = ?", [now, s.session_id]);
-    await sendMessage(s.user_id,
-      `⏰ <b>Payment Session Expired!</b>\n\nPlease try again.`,
-      { reply_markup: inlineKeyboard([[cbButton('🔄 Try Again', `join_${s.channel_id}`)]]) }
-    );
+    // Only notify for user-initiated sessions (not platform fee sessions where creator_user_id = user_id)
+    if (s.user_id !== s.creator_user_id) {
+      await sendMessage(s.user_id,
+        `⏰ <b>Payment Session Expired!</b>\n\nPlease try again.`,
+        { reply_markup: inlineKeyboard([[cbButton('🔄 Try Again', `join_${s.channel_id}`)]]) }
+      );
+    }
   }
 }
 
