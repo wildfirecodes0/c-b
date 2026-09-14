@@ -317,7 +317,6 @@ async function handleSessionInput(msg, session) {
     await clearUserSession(userId);
     return editMessage(chatId,msgId,`✅ <b>Commission Updated!</b>\n\nNew commission: ${pct}%`,{reply_markup:inlineKeyboard([[cbButton('🔙 Back to Settings','admin_settings')]])});
   }
-}
 
   // ---- WELCOME MESSAGE INPUT ----
   if (step === 'set_welcome_message') {
@@ -365,5 +364,6 @@ async function handleSessionInput(msg, session) {
     const { showDripChannelDetail } = require('./creator/welcome');
     return showDripChannelDetail(chatId, userId, data.channelId, msgId);
   }
+}
 
 module.exports = { handleSessionInput };
