@@ -1,5 +1,5 @@
 'use strict';
-const { getChannel, getChannelPlans, getSubscription, hasUsedTrial, getCreator, createPaymentSession, getUSDTRate, clearUserSession } = require('../../db/index');
+const { getChannel, getChannelPlans, getSubscription, hasUsedTrial, getCreator, createPaymentSession, getUSDTRate, getTRXRate, clearUserSession } = require('../../db/index');
 const { sendMessage, editMessage, inlineKeyboard, cbButton, urlButton, createInviteLink } = require('../../utils/telegram');
 const { generateToken, formatDate } = require('../../utils/crypto');
 const { decrypt } = require('../../utils/crypto');
@@ -15,9 +15,14 @@ async function showChannelPlans(chatId, userId, channelId, msgId = null) {
 
   const existing = await getSubscription(userId, channelId);
   if (existing) {
-    const text = `✅ <b>Already Subscribed!</b>\n\nYou already have an active subscription to <b>${channel.channel_name}</b>.`;
-    if (msgId) return editMessage(chatId, msgId, text, { reply_markup: inlineKeyboard([[cbButton('💎 My Memberships', 'user_memberships')], [cbButton('🔙 Back', 'main_menu')]]) });
-    return sendMessage(chatId, text);
+    const text = `✅ <b>Already Subscribed!</b>\n\nYou already have an active subscription to <b>${channel.channel_name}</b>.\n\n📅 <b>Expires:</b> ${require('../../utils/crypto').formatDate(existing.expires_at)}`;
+    const kb = inlineKeyboard([
+      [cbButton('🔄 Renew / Upgrade', `renew_sub_${channelId}`)],
+      [cbButton('💎 My Memberships', 'user_memberships')],
+      [cbButton('🔙 Back', 'main_menu')],
+    ]);
+    if (msgId) return editMessage(chatId, msgId, text, { reply_markup: kb });
+    return sendMessage(chatId, text, { reply_markup: kb });
   }
 
   const plans = await getChannelPlans(channelId);
@@ -81,7 +86,7 @@ async function showPaymentMethods(chatId, userId, planId, msgId) {
 
   const buttons = [];
   if (hasRazorpay) buttons.push([cbButton('💳 Pay via Razorpay', `pay_razorpay_${planId}`)]);
-  if (hasTrx) buttons.push([cbButton('🪙 Pay via TRX (USDT)', `pay_trx_${planId}`)]);
+  if (hasTrx) buttons.push([cbButton('🪙 Pay via TRX (Tron)', `pay_trx_${planId}`)]);
   if (!applied) buttons.push([cbButton('🎟 Apply Coupon Code', `apply_coupon_${planId}`)]);
   buttons.push([cbButton('🔙 Back', `join_${plan.channel_id}`)]);
 
@@ -203,8 +208,8 @@ async function initTrxPayment(chatId, userId, planId, msgId) {
   const applied = session?.current_step === 'coupon_applied' && session.data?.planId === planId ? session.data : null;
   const finalAmount = applied ? Math.max(0, plan.price - applied.discountAmount) : plan.price;
 
-  const usdtRate = await getUSDTRate();
-  const amountUsdt = (finalAmount / 100 / usdtRate).toFixed(2);
+  const trxRate = await getTRXRate();
+  const amountTrx = (finalAmount / 100 / trxRate).toFixed(2);
   const sessionId = generateToken(16);
   const expiresAt = Date.now() + 30 * 60 * 1000; // 30 min window
 
@@ -216,7 +221,7 @@ async function initTrxPayment(chatId, userId, planId, msgId) {
     amount: finalAmount,
     method: 'trx',
     trxWallet: creator.trx_wallet,
-    trxAmountUsdt: parseFloat(amountUsdt),
+    trxAmountUsdt: parseFloat(amountTrx), // stores TRX amount
     couponCode: applied?.couponCode, couponType: applied?.couponType,
     couponId: applied?.couponRecordId, discountAmount: applied?.discountAmount || 0,
     expiresAt,
@@ -225,16 +230,16 @@ async function initTrxPayment(chatId, userId, planId, msgId) {
 
   const channelDisplay = channel?.username ? `@${channel.username}` : channel?.channel_name;
   return editMessage(chatId, msgId,
-    `<b>🪙 TRX / USDT Payment</b>\n━━━━━━━━━━━━━━━━━━\n` +
+    `<b>🪙 TRX Payment</b>\n━━━━━━━━━━━━━━━━━━\n` +
     `📢 <b>Channel:</b> ${channelDisplay}\n` +
     `💎 <b>Plan:</b> ${plan.plan_type}\n` +
     (applied
-      ? `💰 <b>Amount:</b> ₹${finalAmount / 100} (<s>₹${plan.price / 100}</s>) = <code>${amountUsdt} USDT</code> (TRC20)\n🎟 <b>Code:</b> ${applied.couponCode}\n\n`
-      : `💰 <b>Amount:</b> ₹${finalAmount / 100} = <code>${amountUsdt} USDT</code> (TRC20)\n\n`) +
-    `📤 <b>Send USDT (TRC20) to:</b>\n<code>${creator.trx_wallet}</code>\n\n` +
+      ? `💰 <b>Amount:</b> ₹${finalAmount / 100} (<s>₹${plan.price / 100}</s>) = <code>${amountTrx} TRX</code>\n🎟 <b>Code:</b> ${applied.couponCode}\n\n`
+      : `💰 <b>Amount:</b> ₹${finalAmount / 100} = <code>${amountTrx} TRX</code>\n\n`) +
+    `📤 <b>Send TRX to this address:</b>\n<code>${creator.trx_wallet}</code>\n\n` +
     `⏰ <b>Time Remaining:</b> 30:00\n\n` +
     `⏳ <i>Payment will be auto-detected within 30 seconds after confirmation!</i>\n\n` +
-    `⚠️ <i>Send exact USDT amount only. Wrong amount = not detected.</i>`,
+    `⚠️ <i>Send exact TRX amount only. Wrong amount = not detected.</i>`,
     { reply_markup: inlineKeyboard([[cbButton('🔙 Back', `select_plan_${planId}`)]]) }
   );
 }
@@ -289,4 +294,26 @@ async function startTrial(chatId, userId, channelId, msgId = null) {
   return sendMessage(chatId, text, { reply_markup: kb });
 }
 
-module.exports = { showChannelPlans, showPaymentMethods, initRazorpayPayment, initTrxPayment, startTrial };
+module.exports = { showChannelPlans, showChannelPlansForRenewal, showPaymentMethods, initRazorpayPayment, initTrxPayment, startTrial };
+
+// ---- SHOW PLANS FOR RENEWAL (skip already-subscribed check) ----
+async function showChannelPlansForRenewal(chatId, userId, channelId, msgId) {
+  const channel = await getChannel(channelId);
+  if (!channel) return;
+  const plans = await getChannelPlans(channelId);
+  if (!plans.length) return editMessage(chatId, msgId, `❌ <b>No plans available!</b>`, { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'main_menu')]]) });
+
+  const creatorInfo = await getCreator(channel.creator_user_id);
+  const badge = creatorInfo?.is_verified ? ' ✅' : '';
+  const channelDisplay = (channel.username ? `@${channel.username}` : channel.channel_name) + badge;
+
+  let text = `<b>🔄 Renew — ${channelDisplay}</b>\n━━━━━━━━━━━━━━━━━━\nChoose a plan to renew your subscription:\n`;
+  const buttons = [];
+  plans.forEach((plan) => {
+    const emoji = plan.plan_type === 'monthly' ? '📅' : plan.plan_type === 'yearly' ? '📆' : '♾️';
+    text += `\n${emoji} <b>${plan.plan_type}</b> — ₹${plan.price / 100}`;
+    buttons.push([cbButton(`${emoji} ${plan.plan_type} — ₹${plan.price / 100}`, `select_plan_${plan.id}`)]);
+  });
+  buttons.push([cbButton('🔙 Back', 'main_menu')]);
+  return editMessage(chatId, msgId, text, { reply_markup: inlineKeyboard(buttons) });
+}

@@ -32,7 +32,7 @@ async function startCreatorSetup(chatId, userId, msgId) {
       { reply_markup: inlineKeyboard([[cbButton('❓ Contact Support', 'user_support')], [cbButton('🔙 Back', 'main_menu')]]) }
     );
   }
-  if (!creator) creator = await createCreator(userId);
+  // ✅ Creator record created ONLY after payment success - not here
   await setUserSession(userId, 'creator_setup_channel', {}, msgId);
   return editMessage(chatId, msgId,
     `<b>📢 Step 1/4 — Add Your Channel</b>\n━━━━━━━━━━━━━━━━━━\n` +
@@ -165,37 +165,14 @@ async function initPlatformFeePayment(chatId, userId, msgId, method) {
   const settings = await getBotSettings();
   const feeAmount = settings?.platform_fee || 4900; // paise
 
-  let channel = await d1First('SELECT * FROM channels WHERE channel_id=?', [data.channelId]);
-  if (!channel) {
-    await d1Run(
-      `INSERT INTO channels (channel_id, channel_name, username, creator_user_id, type, platform_fee_paid, is_active, created_at, updated_at)
-       VALUES (?,?,?,?,?,0,0,?,?)`,
-      [data.channelId, data.channelName, data.channelUsername || null, userId, data.channelType, Date.now(), Date.now()]
-    );
-    channel = await d1First('SELECT * FROM channels WHERE channel_id=?', [data.channelId]);
-  }
-
-  let plan = await d1First(
-    'SELECT * FROM plans WHERE channel_id=? AND creator_user_id=? AND plan_type=? ORDER BY id DESC LIMIT 1',
-    [data.channelId, userId, data.planType]
-  );
-  if (!plan) {
-    const planName = `${data.planType.charAt(0).toUpperCase() + data.planType.slice(1)} Plan`;
-    await createPlan({
-      channelId: data.channelId, creatorUserId: userId,
-      planName, planType: data.planType, price: data.price * 100, trialDays: data.trialDays || 0,
-    });
-    plan = await d1First(
-      'SELECT * FROM plans WHERE channel_id=? AND creator_user_id=? AND plan_type=? ORDER BY id DESC LIMIT 1',
-      [data.channelId, userId, data.planType]
-    );
-  }
-
+  // ✅ NOTHING inserted into DB yet — all data stays in session until payment succeeds
   const sessionId = generateToken(16);
-  const expiresAt = Date.now() + 30 * 60 * 1000; // 30 min — safely above Razorpay's 15 min minimum
+  const expiresAt = Date.now() + 30 * 60 * 1000;
 
   return createFeePaymentSession(chatId, userId, msgId, {
-    channelId: data.channelId, channelName: data.channelName, planId: plan.id,
+    // Pass channel+plan data via session — DB insert happens only after payment success
+    channelId: data.channelId, channelName: data.channelName,
+    planId: null, // no plan in DB yet
     feeAmount, sessionId, expiresAt, method, backCbData: 'creator_setup_fee',
   });
 }
@@ -204,7 +181,10 @@ async function initPlatformFeePayment(chatId, userId, msgId, method) {
 // actual Razorpay link or TRX address for a ₹fee platform-fee payment.
 async function createFeePaymentSession(chatId, userId, msgId, opts) {
   const { channelId, channelName, planId, feeAmount, sessionId, expiresAt, method, backCbData } = opts;
-  const { createPaymentSession } = require('../../db/index');
+  const { createPaymentSession, setUserSession } = require('../../db/index');
+  // Store all channel+plan data in user session so webhook can create them after payment
+  const sessionData = await require('../../db/index').getUserSession(userId);
+  const pendingData = sessionData?.data || {};
 
   if (method === 'razorpay') {
     let linkRes;
@@ -238,8 +218,13 @@ async function createFeePaymentSession(chatId, userId, msgId, opts) {
     }
 
     await createPaymentSession({
-      sessionId, userId, channelId, planId, creatorUserId: userId,
+      sessionId, userId, channelId, planId: planId || 0, creatorUserId: userId,
       amount: feeAmount, method: 'razorpay', razorpayLinkId: linkRes.id, expiresAt,
+      // Store pending channel+plan data so webhook creates them after payment
+      couponCode: pendingData.channelName, // reuse field to store channelName
+      couponType: pendingData.planType,    // reuse field to store planType
+      couponId: pendingData.price,         // reuse field to store price
+      discountAmount: pendingData.trialDays || 0,
     });
 
     return editMessage(chatId, msgId,
@@ -257,23 +242,27 @@ async function createFeePaymentSession(chatId, userId, msgId, opts) {
       return editMessage(chatId, msgId, `❌ <b>TRX payment is not available right now.</b>`,
         { reply_markup: inlineKeyboard([[cbButton('🔙 Back', backCbData)]]) });
     }
-    const { getUSDTRate } = require('../../db/index');
-    const usdtRate = await getUSDTRate();
-    const amountUsdt = (feeAmount / 100 / usdtRate).toFixed(2);
+    const { getTRXRate } = require('../../db/index');
+    const trxRate = await getTRXRate();
+    const amountTrx = (feeAmount / 100 / trxRate).toFixed(2);
 
     await createPaymentSession({
-      sessionId, userId, channelId, planId, creatorUserId: userId,
-      amount: feeAmount, method: 'trx', trxWallet: platformWallet, trxAmountUsdt: parseFloat(amountUsdt), expiresAt,
+      sessionId, userId, channelId, planId: planId || 0, creatorUserId: userId,
+      amount: feeAmount, method: 'trx', trxWallet: platformWallet, trxAmountUsdt: parseFloat(amountTrx), expiresAt,
+      couponCode: pendingData.channelName,
+      couponType: pendingData.planType,
+      couponId: pendingData.price,
+      discountAmount: pendingData.trialDays || 0,
     });
 
     return editMessage(chatId, msgId,
-      `<b>🪙 TRX / USDT Platform Fee Payment</b>\n━━━━━━━━━━━━━━━━━━\n` +
+      `<b>🪙 TRX Platform Fee Payment</b>\n━━━━━━━━━━━━━━━━━━\n` +
       `📢 <b>Channel:</b> ${channelName}\n` +
-      `💰 <b>Amount:</b> ₹${feeAmount / 100} = <code>${amountUsdt} USDT</code> (TRC20)\n\n` +
-      `📤 <b>Send USDT (TRC20) to:</b>\n<code>${platformWallet}</code>\n\n` +
+      `💰 <b>Amount:</b> ₹${feeAmount / 100} = <code>${amountTrx} TRX</code>\n\n` +
+      `📤 <b>Send TRX to this address:</b>\n<code>${platformWallet}</code>\n\n` +
       `⏰ <b>Time Remaining:</b> 30:00\n\n` +
       `⏳ <i>Payment will be auto-detected within 30 seconds after confirmation!</i>\n\n` +
-      `⚠️ <i>Send exact USDT amount only. Wrong amount = not detected.</i>`,
+      `⚠️ <i>Send exact TRX amount only. Wrong amount = not detected.</i>`,
       { reply_markup: inlineKeyboard([[cbButton('🔙 Back', backCbData)]]) }
     );
   }
@@ -306,7 +295,7 @@ async function initFeeRenewal(chatId, userId, channelId, msgId, method) {
   const settings = await getBotSettings();
   const feeAmount = settings?.platform_fee || 4900;
   const sessionId = generateToken(16);
-  const expiresAt = Date.now() + 15 * 60 * 1000;
+  const expiresAt = Date.now() + 30 * 60 * 1000;
 
   return createFeePaymentSession(chatId, userId, msgId, {
     channelId, channelName: ch.channel_name, planId: plan.id,

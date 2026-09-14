@@ -54,8 +54,16 @@ async function handleCallback(cb) {
     return showMembershipDetail(chatId, userId, data.replace('membership_detail_', ''), msgId);
   }
   if (data.startsWith('cancel_sub_')) {
-    await require('../db/d1').d1Run("UPDATE subscriptions SET status='cancelled', updated_at=? WHERE id=?",[Date.now(),data.replace('cancel_sub_','')]);
-    return editMessage(chatId, msgId, '✅ <b>Subscription Cancelled!</b>',
+    const subId = parseInt(data.replace('cancel_sub_', ''));
+    const { d1First, d1Run } = require('../db/d1');
+    const sub = await d1First("SELECT * FROM subscriptions WHERE id = ? AND user_id = ?", [subId, userId]);
+    if (sub) {
+      await d1Run("UPDATE subscriptions SET status='cancelled', updated_at=? WHERE id=?", [Date.now(), subId]);
+      await d1Run('UPDATE channels SET total_members = MAX(0, total_members - 1), updated_at=? WHERE channel_id=?', [Date.now(), sub.channel_id]);
+      const { kickChatMember } = require('../utils/telegram');
+      try { await kickChatMember(sub.channel_id, userId); } catch (e) {}
+    }
+    return editMessage(chatId, msgId, '✅ <b>Subscription Cancelled!</b>\n\nYou have been removed from the channel.',
       { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'user_memberships')]]) });
   }
   if (data === 'user_transactions') {
@@ -195,6 +203,14 @@ async function handleCallback(cb) {
     const { showCreatorChannelDetail } = require('./creator/channels');
     return showCreatorChannelDetail(chatId, userId, parseInt(data.replace('creator_channel_detail_', '')), msgId);
   }
+  if (data.startsWith('share_channel_link_')) {
+    const channelId = parseInt(data.replace('share_channel_link_', ''));
+    const joinLink = `https://t.me/${process.env.BOT_USERNAME}?start=join_${channelId}`;
+    return editMessage(chatId, msgId,
+      `📤 <b>Share Your Channel Link</b>\n━━━━━━━━━━━━━━━━━━\n\n🔗 <b>Payment Link:</b>\n<code>${joinLink}</code>\n\n<i>Share this link on your social media, website, or directly with your audience. Anyone who clicks it can subscribe to your channel!</i>`,
+      { reply_markup: inlineKeyboard([[cbButton('🔙 Back', `creator_channel_detail_${channelId}`)]]) }
+    );
+  }
   if (data.startsWith('edit_channel_')) {
     const { showEditChannel } = require('./creator/channels');
     return showEditChannel(chatId, userId, parseInt(data.replace('edit_channel_', '')), msgId);
@@ -327,6 +343,11 @@ async function handleCallback(cb) {
   if (data.startsWith('pay_trx_')) {
     const { initTrxPayment } = require('./payment/methods');
     return initTrxPayment(chatId, userId, data.replace('pay_trx_', ''), msgId);
+  }
+  if (data.startsWith('renew_sub_')) {
+    const channelId = parseInt(data.replace('renew_sub_', ''));
+    const { showChannelPlansForRenewal } = require('./payment/plans');
+    return showChannelPlansForRenewal(chatId, userId, channelId, msgId);
   }
   if (data.startsWith('renew_')) {
     const channelId = parseInt(data.replace('renew_', ''));
@@ -499,6 +520,72 @@ async function handleCallback(cb) {
     const { toggleMaintenance } = require('./admin/settings');
     return toggleMaintenance(chatId, userId, msgId);
   }
+}
+
+  // ---- ANALYTICS ----
+  if (data === 'creator_analytics') {
+    const { showCreatorAnalytics } = require('./creator/analytics');
+    return showCreatorAnalytics(chatId, userId, msgId);
+  }
+  if (data === 'analytics_export') {
+    const { exportAnalyticsReport } = require('./creator/analytics');
+    return exportAnalyticsReport(chatId, userId);
+  }
+
+  // ---- EXPORT MEMBERS CSV ----
+  if (data === 'export_members_csv') {
+    const { exportMembersCSV } = require('./creator/welcome');
+    return exportMembersCSV(chatId, userId);
+  }
+
+  // ---- WELCOME MESSAGES ----
+  if (data === 'welcome_messages') {
+    const { showWelcomeMessageSettings } = require('./creator/welcome');
+    return showWelcomeMessageSettings(chatId, userId, msgId);
+  }
+  if (data.startsWith('welcome_msg_channel_')) {
+    const channelId = parseInt(data.replace('welcome_msg_channel_', ''));
+    const { showChannelWelcomeDetail } = require('./creator/welcome');
+    return showChannelWelcomeDetail(chatId, userId, channelId, msgId);
+  }
+  if (data.startsWith('welcome_msg_edit_')) {
+    const channelId = parseInt(data.replace('welcome_msg_edit_', ''));
+    await setUserSession(userId, 'set_welcome_message', { channelId }, msgId);
+    return editMessage(chatId, msgId,
+      `<b>👋 Set Welcome Message</b>\n━━━━━━━━━━━━━━━━━━\n\nSend your welcome message text.\n\n<b>Variables you can use:</b>\n• <code>{name}</code> — subscriber name\n• <code>{channel}</code> — channel name\n• <code>{expires}</code> — expiry date`,
+      { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'welcome_messages')]]) }
+    );
+  }
+  if (data.startsWith('welcome_msg_delete_')) {
+    const channelId = parseInt(data.replace('welcome_msg_delete_', ''));
+    const { deleteWelcomeMessage } = require('./creator/welcome');
+    return deleteWelcomeMessage(chatId, userId, channelId, msgId);
+  }
+
+  // ---- DRIP CONTENT ----
+  if (data === 'drip_content') {
+    const { showDripContentSettings } = require('./creator/welcome');
+    return showDripContentSettings(chatId, userId, msgId);
+  }
+  if (data.startsWith('drip_channel_')) {
+    const channelId = parseInt(data.replace('drip_channel_', ''));
+    const { showDripChannelDetail } = require('./creator/welcome');
+    return showDripChannelDetail(chatId, userId, channelId, msgId);
+  }
+  if (data.startsWith('drip_add_')) {
+    const channelId = parseInt(data.replace('drip_add_', ''));
+    await setUserSession(userId, 'drip_set_day', { channelId }, msgId);
+    return editMessage(chatId, msgId,
+      `<b>⏰ Add Drip Message</b>\n━━━━━━━━━━━━━━━━━━\n\n📅 <b>On which day after joining should this message be sent?</b>\n\n<i>Example: Enter 1 for Day 1, 7 for Day 7, 30 for Day 30</i>`,
+      { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'drip_content')]]) }
+    );
+  }
+  if (data.startsWith('drip_clear_')) {
+    const channelId = parseInt(data.replace('drip_clear_', ''));
+    const { clearDripContent } = require('./creator/welcome');
+    return clearDripContent(chatId, userId, channelId, msgId);
+  }
+
 }
 
 module.exports = { handleCallback };

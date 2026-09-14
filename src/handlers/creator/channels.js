@@ -41,9 +41,22 @@ async function showCreatorChannelDetail(chatId, userId, channelId, msgId) {
   ]);
   const name = ch.username ? `@${ch.username}` : ch.channel_name;
   const status = ch.is_suspended ? '🚫 Suspended' : ch.is_paused ? '⏸ Paused' : '✅ Active';
+  const joinLink = `https://t.me/${process.env.BOT_USERNAME}?start=join_${channelId}`;
   return editMessage(chatId, msgId,
-    `📢 <b>Channel:</b> <i>${name}</i>\n👥 <b>Total Members:</b> ${ch.total_members}\n💰 <b>Total Revenue:</b> ₹${(revenue?.t||0)/100}\n📈 <b>This Month:</b> ₹${(monthRevenue?.t||0)/100}\n🎟 <b>Active Plans:</b> ${activePlans?.c||0}\n⏳ <b>Expiring Soon:</b> ${expiring?.c||0} members\n🌐 <b>Status:</b> ${status}`,
-    { reply_markup: inlineKeyboard([[cbButton('✏️ Edit',`edit_channel_${channelId}`), cbButton('🗑 Delete',`delete_channel_${channelId}`)], [cbButton('🔙 Back to List','creator_channels')]]) }
+    `📢 <b>Channel:</b> <i>${name}</i>\n` +
+    `👥 <b>Total Members:</b> ${ch.total_members}\n` +
+    `💰 <b>Total Revenue:</b> ₹${(revenue?.t||0)/100}\n` +
+    `📈 <b>This Month:</b> ₹${(monthRevenue?.t||0)/100}\n` +
+    `🎟 <b>Active Plans:</b> ${activePlans?.c||0}\n` +
+    `⏳ <b>Expiring Soon:</b> ${expiring?.c||0} members\n` +
+    `🌐 <b>Status:</b> ${status}\n\n` +
+    `🔗 <b>Your Payment Link:</b>\n<code>${joinLink}</code>\n` +
+    `<i>Share this link with your audience to get subscribers!</i>`,
+    { reply_markup: inlineKeyboard([
+      [cbButton('✏️ Edit', `edit_channel_${channelId}`), cbButton('🗑 Delete', `delete_channel_${channelId}`)],
+      [cbButton('📤 Share Link', `share_channel_link_${channelId}`)],
+      [cbButton('🔙 Back to List', 'creator_channels')],
+    ]) }
   );
 }
 

@@ -7,6 +7,14 @@ const { pollTrxPayments } = require('./payment/trx');
 const { getAdmin } = require('../db/index');
 
 function startCronJobs() {
+  // Drip content — run every hour
+  cron.schedule('0 * * * *', async () => {
+    try {
+      const { sendDripMessages } = require('./creator/welcome');
+      await sendDripMessages();
+    } catch (e) { console.error('Drip cron error:', e.message); }
+  });
+
   cron.schedule('* * * * *', async () => {
     try {
       await Promise.all([

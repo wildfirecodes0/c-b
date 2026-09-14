@@ -139,6 +139,10 @@ async function handleChannelMember(update) {
         if (!user) return;
         const session = await getUserSession(userId);
         if (session?.current_step === 'waiting_channel_join') {
+          // Delete the "please join channel" waiting message
+          if (session.message_id) {
+            try { await deleteMessage(userId, session.message_id); } catch (e) {}
+          }
           await clearUserSession(userId);
           const { showMenu } = require('./user/start');
           return showMenu(userId, userId, user, session.data?.param);

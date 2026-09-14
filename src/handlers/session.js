@@ -318,4 +318,52 @@ async function handleSessionInput(msg, session) {
     return editMessage(chatId,msgId,`✅ <b>Commission Updated!</b>\n\nNew commission: ${pct}%`,{reply_markup:inlineKeyboard([[cbButton('🔙 Back to Settings','admin_settings')]])});
   }
 }
+
+  // ---- WELCOME MESSAGE INPUT ----
+  if (step === 'set_welcome_message') {
+    if (!text || text.length < 5) {
+      return editMessage(chatId, msgId, '❌ <b>Message too short!</b> Min 5 characters.', { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'welcome_messages')]]) });
+    }
+    if (text.length > 1000) {
+      return editMessage(chatId, msgId, '❌ <b>Message too long!</b> Max 1000 characters.', { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'welcome_messages')]]) });
+    }
+    await d1Run('UPDATE channels SET welcome_message=?, updated_at=? WHERE channel_id=? AND creator_user_id=?', [text, Date.now(), data.channelId, userId]);
+    await clearUserSession(userId);
+    return editMessage(chatId, msgId,
+      `✅ <b>Welcome Message Set!</b>\n\n<i>${text}</i>\n\n<b>This will be sent to every new subscriber automatically.</b>`,
+      { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'welcome_messages')]]) }
+    );
+  }
+
+  // ---- DRIP CONTENT INPUT ----
+  if (step === 'drip_set_day') {
+    const day = parseInt(text);
+    if (isNaN(day) || day < 1 || day > 365) {
+      return editMessage(chatId, msgId, '❌ <b>Invalid day!</b> Enter a number between 1 and 365.', { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'drip_content')]]) });
+    }
+    await setUserSession(userId, 'drip_set_message', { ...data, day }, msgId);
+    return editMessage(chatId, msgId,
+      `✅ <b>Day ${day} selected!</b>\n\n💬 <b>Now send the message to deliver on Day ${day}:</b>\n\n<i>Variables: <code>{name}</code>, <code>{channel}</code>, <code>{day}</code></i>`,
+      { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'drip_content')]]) }
+    );
+  }
+
+  if (step === 'drip_set_message') {
+    if (!text || text.length < 5) {
+      return editMessage(chatId, msgId, '❌ <b>Message too short!</b>', { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'drip_content')]]) });
+    }
+    const ch = await d1First('SELECT drip_content FROM channels WHERE channel_id=? AND creator_user_id=?', [data.channelId, userId]);
+    let drips = [];
+    try { drips = ch?.drip_content ? JSON.parse(ch.drip_content) : []; } catch {}
+    // Replace if same day exists
+    const idx = drips.findIndex(d => d.day === data.day);
+    if (idx >= 0) drips[idx] = { day: data.day, message: text };
+    else drips.push({ day: data.day, message: text });
+    drips.sort((a, b) => a.day - b.day);
+    await d1Run('UPDATE channels SET drip_content=?, updated_at=? WHERE channel_id=? AND creator_user_id=?', [JSON.stringify(drips), Date.now(), data.channelId, userId]);
+    await clearUserSession(userId);
+    const { showDripChannelDetail } = require('./creator/welcome');
+    return showDripChannelDetail(chatId, userId, data.channelId, msgId);
+  }
+
 module.exports = { handleSessionInput };

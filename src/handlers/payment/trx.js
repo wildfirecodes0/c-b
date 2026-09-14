@@ -1,11 +1,11 @@
 'use strict';
 const fetch = require('node-fetch');
-const { d1All, d1Run } = require('../../db/d1');
-const { isTrxHashUsed, markTrxHashUsed, isWalletBlacklisted, getUSDTRate, updatePaymentSession } = require('../../db/index');
+const { d1All, d1Run, d1First } = require('../../db/d1');
+const { isTrxHashUsed, markTrxHashUsed, isWalletBlacklisted, updatePaymentSession } = require('../../db/index');
 const { processSuccessfulPayment } = require('./razorpay-webhook');
 
 const TRONGRID_BASE = 'https://api.trongrid.io';
-const USDT_CONTRACT = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
+const SUN_PER_TRX = 1_000_000;
 
 async function pollTrxPayments() {
   try {
@@ -16,11 +16,6 @@ async function pollTrxPayments() {
     for (const session of pending) {
       await checkTrxSession(session);
     }
-    // Expire old sessions
-    await d1Run(
-      "UPDATE payment_sessions SET status = 'expired', updated_at = ? WHERE method = 'trx' AND status = 'pending' AND expires_at <= ?",
-      [Date.now(), Date.now()]
-    );
   } catch (err) {
     console.error('TRX poll error:', err.message);
   }
@@ -29,20 +24,29 @@ async function pollTrxPayments() {
 async function checkTrxSession(session) {
   try {
     if (!session.trx_wallet) return;
-    const res = await fetch(
-      `${TRONGRID_BASE}/v1/accounts/${session.trx_wallet}/transactions/trc20?limit=20&contract_address=${USDT_CONTRACT}`,
-      { headers: { 'TRON-PRO-API-KEY': process.env.TRONGRID_API_KEY } }
-    );
-    if (!res.ok) return;
+
+    // Fetch native TRX transactions to this wallet
+    const url = `${TRONGRID_BASE}/v1/accounts/${session.trx_wallet}/transactions?limit=20&only_to=true`;
+    const res = await fetch(url, {
+      headers: { 'TRON-PRO-API-KEY': process.env.TRONGRID_API_KEY || '' }
+    });
+
+    if (!res.ok) {
+      console.error('TronGrid API error:', res.status);
+      return;
+    }
+
     const data = await res.json();
     if (!data.data?.length) return;
 
     for (const txn of data.data) {
       const valid = await validateTrxTransaction(txn, session);
       if (valid) {
-        await markTrxHashUsed(txn.transaction_id, session.user_id);
-        await updatePaymentSession(session.session_id, { status: 'completed', trx_txn_hash: txn.transaction_id });
-        await processSuccessfulPayment(session, { hash: txn.transaction_id, usdtAmount: session.trx_amount_usdt }, 'TRX');
+        const txnHash = txn.txID;
+        console.log(`TRX payment matched! Hash: ${txnHash} Session: ${session.session_id}`);
+        await markTrxHashUsed(txnHash, session.user_id);
+        await updatePaymentSession(session.session_id, { status: 'completed', trx_txn_hash: txnHash });
+        await processSuccessfulPayment(session, { hash: txnHash, trxAmount: session.trx_amount_usdt }, 'TRX');
         break;
       }
     }
@@ -53,27 +57,51 @@ async function checkTrxSession(session) {
 
 async function validateTrxTransaction(txn, session) {
   try {
-    if (await isTrxHashUsed(txn.transaction_id)) return false;
-    if (txn.to?.toLowerCase() !== session.trx_wallet?.toLowerCase()) return false;
-    if (txn.token_info?.address !== USDT_CONTRACT) return false;
+    const txnHash = txn.txID;
+    if (!txnHash) return false;
 
-    const received = parseInt(txn.value) / 1_000_000;
-    const expected = parseFloat(session.trx_amount_usdt);
-    if (Math.abs(received - expected) > 0.01) return false;
+    // Must be TransferContract (native TRX)
+    const contract = txn.raw_data?.contract?.[0];
+    if (contract?.type !== 'TransferContract') return false;
 
-    const confirmRes = await fetch(
-      `${TRONGRID_BASE}/v1/transactions/${txn.transaction_id}`,
-      { headers: { 'TRON-PRO-API-KEY': process.env.TRONGRID_API_KEY } }
-    );
-    const confirmData = await confirmRes.json();
-    const confirmations = confirmData.data?.[0]?.confirmations || 0;
-    if (confirmations < 20) return false;
-    if (confirmData.data?.[0]?.ret?.[0]?.contractRet !== 'SUCCESS') return false;
-    if (await isWalletBlacklisted(txn.from)) return false;
-    if (txn.block_timestamp < session.created_at - 60000) return false;
+    const value = contract?.parameter?.value;
+    if (!value) return false;
+
+    // ✅ Recipient address check (TronGrid returns base58 in to_address field)
+    const toAddr = (value.to_address || '').toLowerCase().trim();
+    const walletAddr = (session.trx_wallet || '').toLowerCase().trim();
+    if (!toAddr || !walletAddr) return false;
+    if (toAddr !== walletAddr) {
+      // Some TronGrid responses encode as hex — skip those silently
+      return false;
+    }
+
+    // ✅ Amount check with tolerance
+    const receivedSun = parseInt(value.amount || 0);
+    const receivedTrx = receivedSun / SUN_PER_TRX;
+    const expectedTrx = parseFloat(session.trx_amount_usdt); // stored as TRX amount
+    if (Math.abs(receivedTrx - expectedTrx) > 0.5) return false; // 0.5 TRX tolerance
+
+    // ✅ Not already used
+    if (await isTrxHashUsed(txnHash)) return false;
+
+    // ✅ Transaction must be AFTER session creation (with 2 min buffer)
+    const txnTime = txn.block_timestamp || 0;
+    if (txnTime < session.created_at - 2 * 60 * 1000) return false;
+
+    // ✅ Transaction must be SUCCESS
+    const ret = txn.ret?.[0];
+    if (ret?.contractRet && ret.contractRet !== 'SUCCESS') return false;
+
+    // ✅ Blacklist check
+    const fromAddr = value.owner_address || '';
+    if (fromAddr && await isWalletBlacklisted(fromAddr)) return false;
 
     return true;
-  } catch { return false; }
+  } catch (e) {
+    console.error('validateTrxTransaction error:', e.message);
+    return false;
+  }
 }
 
 module.exports = { pollTrxPayments };

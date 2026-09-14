@@ -127,7 +127,15 @@ async function showCreatorSettings(chatId, userId, msgId) {
   const trx=creator?.trx_wallet?`<code>${creator.trx_wallet.substring(0,10)}...</code> ✅`:'Not set ❌';
   return editMessage(chatId,msgId,
     `<b>⚙️ Settings</b>\n━━━━━━━━━━━━━━━━━━\n💳 <b>Payment Gateway:</b> ${gw}\n🪙 <b>TRX Wallet:</b> ${trx}\n🔔 <b>Notifications:</b> ✅ On`,
-    {reply_markup:inlineKeyboard([[cbButton('💳 Update Razorpay Keys','settings_update_razorpay')],[cbButton('🪙 Update TRX Wallet','settings_update_trx')],[cbButton('🎟 My Coupons','creator_coupons')],[cbButton('🔔 Toggle Notifications','settings_toggle_notif')],[cbButton('🔙 Back','creator_menu')]])}
+    {reply_markup:inlineKeyboard([
+      [cbButton('💳 Update Razorpay Keys','settings_update_razorpay')],
+      [cbButton('🪙 Update TRX Wallet','settings_update_trx')],
+      [cbButton('🎟 My Coupons','creator_coupons')],
+      [cbButton('👋 Welcome Messages','welcome_messages')],
+      [cbButton('⏰ Drip Content','drip_content')],
+      [cbButton('🔔 Toggle Notifications','settings_toggle_notif')],
+      [cbButton('🔙 Back','creator_menu')],
+    ])}
   );
 }
 

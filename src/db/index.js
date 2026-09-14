@@ -465,6 +465,18 @@ async function recordCodeUsage(type, recordId, userId, transactionId = null) {
 // ============================================
 // USDT RATE
 // ============================================
+async function getTRXRate() {
+  const cached = cache.get("trxRate");
+  if (cached) return cached;
+  try {
+    const res = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=tron&vs_currencies=inr");
+    const data = await res.json();
+    const rate = data.tron?.inr || 10;
+    cache.set("trxRate", rate, 120);
+    return rate;
+  } catch { return 10; }
+}
+
 async function getUSDTRate() {
   const cached = cache.get('usdtRate');
   if (cached) return cached;
@@ -496,4 +508,5 @@ module.exports = {
   createTicket, getTicket, addTicketReply, getTicketReplies, closeTicketAndWipe, getCoupon,
   validateDiscountCode, recordCodeUsage,
   getUSDTRate,
+  getTRXRate,
 };
