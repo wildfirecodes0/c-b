@@ -105,6 +105,7 @@ CREATE TABLE IF NOT EXISTS channels (
     invite_link TEXT,
     platform_fee_paid INTEGER DEFAULT 0,
     platform_fee_expires_at INTEGER,
+    fee_reminder_sent INTEGER DEFAULT 0,
     stats_public INTEGER DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,

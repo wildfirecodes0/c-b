@@ -520,7 +520,6 @@ async function handleCallback(cb) {
     const { toggleMaintenance } = require('./admin/settings');
     return toggleMaintenance(chatId, userId, msgId);
   }
-}
 
   // ---- ANALYTICS ----
   if (data === 'creator_analytics') {

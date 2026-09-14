@@ -111,12 +111,13 @@ async function expirePaymentSessions() {
 async function checkCreatorFeeExpiry() {
   const now = Date.now();
   const threeDays = now + 3 * 24 * 60 * 60 * 1000;
-  const expiring = await d1All('SELECT * FROM channels WHERE platform_fee_expires_at <= ? AND platform_fee_expires_at > ? AND is_active = 1', [threeDays, now]);
+  const expiring = await d1All('SELECT * FROM channels WHERE platform_fee_expires_at <= ? AND platform_fee_expires_at > ? AND is_active = 1 AND fee_reminder_sent = 0', [threeDays, now]);
   for (const ch of expiring) {
     await sendMessage(ch.creator_user_id,
-      `⚠️ <b>Platform Fee Expiring!</b>\n📢 ${ch.channel_name}\n💥 ${formatDate(ch.platform_fee_expires_at)}`,
+      `⚠️ <b>Platform Fee Expiring in 3 Days!</b>\n📢 ${ch.channel_name}\n💥 <b>Expires:</b> ${formatDate(ch.platform_fee_expires_at)}\n\nRenew now to avoid your channel being suspended.`,
       { reply_markup: inlineKeyboard([[cbButton('💰 Renew Now — ₹49', `renew_fee_${ch.channel_id}`)]]) }
     );
+    await d1Run('UPDATE channels SET fee_reminder_sent = 1 WHERE channel_id = ?', [ch.channel_id]);
   }
   const feeExpired = await d1All('SELECT * FROM channels WHERE platform_fee_expires_at <= ? AND is_active = 1', [now]);
   for (const ch of feeExpired) {

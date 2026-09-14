@@ -353,6 +353,8 @@ async function markTrialUsed(userId, channelId, expiresAt) {
 // ============================================
 // REFERRALS
 // ============================================
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
 async function handleReferralReward(referrerUserId, referredUserId) {
   const referral = await d1First(
     "SELECT * FROM referrals WHERE referrer_user_id = ? AND referred_user_id = ?",
@@ -365,7 +367,35 @@ async function handleReferralReward(referrerUserId, referredUserId) {
   );
   await d1Run('UPDATE users SET free_days_earned = free_days_earned + 1, updated_at = ? WHERE user_id = ?', [Date.now(), referrerUserId]);
   cache.del(`user:${referrerUserId}`);
+
+  // Actually grant the free day: extend the referrer's channel(s) platform-fee
+  // expiry by 1 day, so 4 referrals = 4 free days of platform use, no payment needed.
+  // The existing checkCreatorFeeExpiry cron already reminds them 3 days before this
+  // (now-extended) expiry, so renewal reminders keep working automatically.
+  await applyFreeDayToCreatorChannels(referrerUserId);
+
   return true;
+}
+
+// Extends platform_fee_expires_at by 1 free day for every channel the user owns.
+// If a channel's fee already expired (or was never paid), the free day is counted
+// starting from now — this also reactivates a suspended channel.
+async function applyFreeDayToCreatorChannels(userId) {
+  const now = Date.now();
+  const channels = await d1All(
+    'SELECT channel_id, platform_fee_expires_at FROM channels WHERE creator_user_id = ?',
+    [userId]
+  );
+  for (const ch of channels) {
+    const base = (ch.platform_fee_expires_at && ch.platform_fee_expires_at > now) ? ch.platform_fee_expires_at : now;
+    const newExpiry = base + ONE_DAY_MS;
+    await d1Run(
+      "UPDATE channels SET platform_fee_expires_at = ?, platform_fee_paid = 1, is_active = 1, is_suspended = 0, suspend_reason = NULL, fee_reminder_sent = 0, updated_at = ? WHERE channel_id = ?",
+      [newExpiry, now, ch.channel_id]
+    );
+    cache.del(`channel:${ch.channel_id}`);
+  }
+  return channels.length;
 }
 
 // ============================================

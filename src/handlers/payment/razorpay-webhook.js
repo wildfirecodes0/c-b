@@ -208,7 +208,10 @@ async function processSuccessfulPayment(session, paymentData, method) {
     if (user.referred_by) {
       const rewarded = await handleReferralReward(user.referred_by, user.user_id);
       if (rewarded) {
-        await sendMessage(user.referred_by, `🎁 <b>Referral Reward!</b>\n\nYour friend subscribed! You earned <b>1 free day</b> 🎉`);
+        await sendMessage(user.referred_by,
+          `🎁 <b>Referral Reward!</b>\n\nYour friend subscribed! You earned <b>1 free day</b> 🎉\n\n` +
+          `💡 <i>If you're a creator, this free day has been added automatically to your channel's platform fee — no payment needed for that day. Refer 4 friends = 4 free days!</i>`
+        );
       }
     }
   } catch (err) {
@@ -230,7 +233,7 @@ async function completePlatformFeePayment(session, method) {
     if (isRenewal) {
       // Just renew fee — channel/plan already exist
       await d1Run(
-        'UPDATE channels SET platform_fee_paid=1, platform_fee_expires_at=?, is_active=1, is_suspended=0, suspend_reason=NULL, updated_at=? WHERE channel_id=?',
+        'UPDATE channels SET platform_fee_paid=1, platform_fee_expires_at=?, is_active=1, is_suspended=0, suspend_reason=NULL, fee_reminder_sent=0, updated_at=? WHERE channel_id=?',
         [feeExpiresAt, now, session.channel_id]
       );
     } else {
