@@ -102,37 +102,6 @@ async function handleCallback(cb) {
     const { showFAQ } = require('./user/menu');
     return showFAQ(chatId, userId, msgId);
   }
-  if (data === 'support_raise_ticket') {
-    await setUserSession(userId, 'support_ticket_subject', {}, msgId);
-    return editMessage(chatId, msgId,
-      `<b>🎫 Raise a Support Ticket</b>\n━━━━━━━━━━━━━━━━━━\n✏️ <b>Enter a short subject for your issue:</b>`,
-      { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'user_support')]]) });
-  }
-  if (data === 'support_track_ticket_start') {
-    await setUserSession(userId, 'support_track_ticket', {}, msgId);
-    return editMessage(chatId, msgId,
-      `<b>🔍 Track a Ticket</b>\n━━━━━━━━━━━━━━━━━━\n✏️ <b>Enter your Ticket ID:</b>\n📌 <i>Example: TKT1234567890</i>`,
-      { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'user_support')]]) });
-  }
-  if (data.startsWith('ticket_followup_')) {
-    const ticketId = data.replace('ticket_followup_', '');
-    await setUserSession(userId, 'user_ticket_followup', { ticketId }, msgId);
-    return editMessage(chatId, msgId,
-      `<b>💬 Send Follow-up</b>\n━━━━━━━━━━━━━━━━━━\n🆔 <b>Ticket:</b> <code>${ticketId}</code>\n\n✏️ <b>Type your message</b> (or send a photo/video/document):`,
-      { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'user_support')]]) });
-  }
-  if (data.startsWith('ticket_reply_')) {
-    const ticketId = data.replace('ticket_reply_', '');
-    await setUserSession(userId, 'admin_ticket_reply', { ticketId }, msgId);
-    return editMessage(chatId, msgId,
-      `<b>↩️ Reply to Ticket</b>\n━━━━━━━━━━━━━━━━━━\n🆔 <code>${ticketId}</code>\n\n✏️ <b>Type your reply</b> (or send a photo/video/document):`,
-      { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'admin_menu')]]) });
-  }
-  if (data.startsWith('ticket_close_')) {
-    const ticketId = data.replace('ticket_close_', '');
-    const { closeTicketWithPDF } = require('./admin/tickets');
-    return closeTicketWithPDF(chatId, ticketId, msgId);
-  }
   if (data === 'user_become_creator') {
     const { showBecomeCreator } = require('./creator/onboarding');
     return showBecomeCreator(chatId, userId, msgId);
@@ -246,6 +215,10 @@ async function handleCallback(cb) {
   if (data.startsWith('renew_fee_')) {
     const { showFeeRenewal } = require('./creator/onboarding');
     return showFeeRenewal(chatId, userId, parseInt(data.replace('renew_fee_', '')), msgId);
+  }
+  if (data.startsWith('claim_free_access_')) {
+    const { handleClaimFreeAccess } = require('./creator/onboarding');
+    return handleClaimFreeAccess(chatId, userId, parseInt(data.replace('claim_free_access_', '')), msgId);
   }
   if (data === 'creator_plans' || data.startsWith('creator_plans_page_')) {
     const page = data.startsWith('creator_plans_page_') ? parseInt(data.split('_').pop()) : 1;

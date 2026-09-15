@@ -404,78 +404,41 @@ async function handleReferralReward(referrerUserId, referredUserId) {
     "UPDATE referrals SET status='converted', converted_at=?, free_days_given=1 WHERE id=?",
     [Date.now(), referral.id]
   );
-  await d1Run('UPDATE users SET free_days_earned = free_days_earned + 1, updated_at = ? WHERE user_id = ?', [Date.now(), referrerUserId]);
+  // free_days_earned = lifetime total (never decreases, just a stat).
+  // unclaimed_free_days = the actual claimable balance (goes to 0 once claimed).
+  await d1Run(
+    'UPDATE users SET free_days_earned = free_days_earned + 1, unclaimed_free_days = unclaimed_free_days + 1, updated_at = ? WHERE user_id = ?',
+    [Date.now(), referrerUserId]
+  );
   cache.del(`user:${referrerUserId}`);
-
-  // Actually grant the free day: extend the referrer's channel(s) platform-fee
-  // expiry by 1 day, so 4 referrals = 4 free days of platform use, no payment needed.
-  // The existing checkCreatorFeeExpiry cron already reminds them 3 days before this
-  // (now-extended) expiry, so renewal reminders keep working automatically.
-  await applyFreeDayToCreatorChannels(referrerUserId);
-
   return true;
 }
 
-// Extends platform_fee_expires_at by 1 free day for every channel the user owns.
-// If a channel's fee already expired (or was never paid), the free day is counted
-// starting from now — this also reactivates a suspended channel.
-async function applyFreeDayToCreatorChannels(userId) {
-  const now = Date.now();
-  const channels = await d1All(
-    'SELECT channel_id, platform_fee_expires_at FROM channels WHERE creator_user_id = ?',
-    [userId]
-  );
-  for (const ch of channels) {
-    const base = (ch.platform_fee_expires_at && ch.platform_fee_expires_at > now) ? ch.platform_fee_expires_at : now;
-    const newExpiry = base + ONE_DAY_MS;
-    await d1Run(
-      "UPDATE channels SET platform_fee_expires_at = ?, platform_fee_paid = 1, is_active = 1, is_suspended = 0, suspend_reason = NULL, fee_reminder_sent = 0, updated_at = ? WHERE channel_id = ?",
-      [newExpiry, now, ch.channel_id]
-    );
-    cache.del(`channel:${ch.channel_id}`);
-  }
-  return channels.length;
-}
+// Applies ALL of the user's unclaimed free days to one specific channel's platform
+// fee at once (an all-or-nothing claim), then resets the unclaimed balance to 0.
+// The lifetime free_days_earned stat is untouched, so past referrals still count.
+async function claimFreeAccess(userId, channelId) {
+  const user = await getUser(userId);
+  const days = user?.unclaimed_free_days || 0;
+  if (days <= 0) return { claimed: 0 };
 
-// ============================================
-// SUPPORT TICKETS
-// ============================================
-async function createTicket(data) {
-  const ticketId = `TKT${Date.now()}`;
+  const ch = await d1First('SELECT channel_id, platform_fee_expires_at FROM channels WHERE channel_id = ? AND creator_user_id = ?', [channelId, userId]);
+  if (!ch) return { claimed: 0 };
+
   const now = Date.now();
+  const base = (ch.platform_fee_expires_at && ch.platform_fee_expires_at > now) ? ch.platform_fee_expires_at : now;
+  const newExpiry = base + days * ONE_DAY_MS;
+
   await d1Run(
-    `INSERT INTO support_tickets (ticket_id, user_id, subject, message, media_type, media_file_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?)`,
-    [ticketId, data.userId, data.subject, data.message || null, data.mediaType || null, data.mediaFileId || null, now, now]
+    "UPDATE channels SET platform_fee_expires_at = ?, platform_fee_paid = 1, is_active = 1, is_suspended = 0, suspend_reason = NULL, fee_reminder_sent = 0, updated_at = ? WHERE channel_id = ?",
+    [newExpiry, now, channelId]
   );
-  return ticketId;
-}
+  cache.del(`channel:${channelId}`);
 
-async function getTicket(ticketId) {
-  return d1First('SELECT * FROM support_tickets WHERE ticket_id = ?', [ticketId]);
-}
+  await d1Run('UPDATE users SET unclaimed_free_days = 0, updated_at = ? WHERE user_id = ?', [now, userId]);
+  cache.del(`user:${userId}`);
 
-async function addTicketReply(data) {
-  const now = Date.now();
-  await d1Run(
-    `INSERT INTO ticket_replies (ticket_id, sender_id, sender_role, message, media_type, media_file_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [data.ticketId, data.senderId, data.senderRole, data.message || null, data.mediaType || null, data.mediaFileId || null, now]
-  );
-  await d1Run("UPDATE support_tickets SET status='in_progress', updated_at=? WHERE ticket_id=?", [now, data.ticketId]);
-}
-
-async function getTicketReplies(ticketId) {
-  return d1All('SELECT * FROM ticket_replies WHERE ticket_id = ? ORDER BY created_at ASC', [ticketId]);
-}
-
-// Wipes the ticket's content (subject/message/media/replies) but keeps the
-// ticket_id + status='closed' so the user can still track it by ID.
-async function closeTicketAndWipe(ticketId) {
-  const now = Date.now();
-  await d1Run('DELETE FROM ticket_replies WHERE ticket_id = ?', [ticketId]);
-  await d1Run(
-    "UPDATE support_tickets SET subject=NULL, message=NULL, media_type=NULL, media_file_id=NULL, status='closed', closed_at=?, updated_at=? WHERE ticket_id=?",
-    [now, now, ticketId]
-  );
+  return { claimed: days, newExpiry };
 }
 
 // ============================================
@@ -574,8 +537,8 @@ module.exports = {
   getBotSettings, updateBotSettings, initBotSettings,
   checkRateLimit,
   hasUsedTrial, markTrialUsed,
-  handleReferralReward,
-  createTicket, getTicket, addTicketReply, getTicketReplies, closeTicketAndWipe, getCoupon,
+  handleReferralReward, claimFreeAccess,
+  getCoupon,
   validateDiscountCode, recordCodeUsage,
   getUSDTRate,
   getTRXRate,

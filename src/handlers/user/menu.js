@@ -132,17 +132,18 @@ async function showReferEarn(chatId, userId, msgId) {
   const user = await getUser(userId);
   const total = await d1First('SELECT COUNT(*) as c FROM referrals WHERE referrer_user_id = ?', [userId]);
   const converted = await d1First("SELECT COUNT(*) as c FROM referrals WHERE referrer_user_id = ? AND status = 'converted'", [userId]);
+  const unclaimed = user.unclaimed_free_days || 0;
   const link = `https://t.me/${process.env.BOT_USERNAME}?start=ref_${user.referral_code}`;
   return editMessage(chatId, msgId,
-    `<b>🎁 Refer & Earn</b>\n━━━━━━━━━━━━━━━━━━\n<b>🔗 Your Referral Link:</b>\n<code>${link}</code>\n\n┌─────────────────────────┐\n│ 👥 <b>Total Referrals:</b> ${total?.c||0}   │\n│ ✅ <b>Converted:</b> ${converted?.c||0}         │\n│ 🎁 <b>Earned:</b> ${user.free_days_earned||0} free days │\n└─────────────────────────┘\n\n💡 <i>Earn 1 free day for every friend who subscribes!</i>`,
+    `<b>🎁 Refer & Earn</b>\n━━━━━━━━━━━━━━━━━━\n<b>🔗 Your Referral Link:</b>\n<code>${link}</code>\n\n┌─────────────────────────┐\n│ 👥 <b>Total Referrals:</b> ${total?.c||0}   │\n│ ✅ <b>Converted:</b> ${converted?.c||0}         │\n│ 🎁 <b>Lifetime Earned:</b> ${user.free_days_earned||0} days │\n│ 💰 <b>Unclaimed:</b> ${unclaimed} day${unclaimed===1?'':'s'}      │\n└─────────────────────────┘\n\n💡 <i>Earn 1 free day for every friend who subscribes! If you're a creator, claim your unclaimed days anytime from your channel's "Renew Platform Fee" screen.</i>`,
     { reply_markup: inlineKeyboard([[{ text: '📤 Share Link', switch_inline_query: `Join Crevio! ${link}` }], [cbButton('🔙 Back', 'main_menu')]]) }
   );
 }
 
 async function showSupport(chatId, userId, msgId) {
   return editMessage(chatId, msgId,
-    `<b>❓ Support & Help</b>\n━━━━━━━━━━━━━━━━━━\nHow can we help you today?\n\n💬 <i>Chat with our support team</i>\n🎫 <i>Raise a support ticket</i>\n🔍 <i>Track an existing ticket</i>\n📖 <i>Browse FAQs</i>`,
-    { reply_markup: inlineKeyboard([[urlButton('💬 Chat Support', 'https://t.me/RaushanKakhaura'), cbButton('🎫 Raise a Ticket', 'support_raise_ticket')], [cbButton('🔍 Track a Ticket', 'support_track_ticket_start')], [cbButton('📖 FAQ', 'support_faq')], [cbButton('🔙 Back', 'main_menu')]]) }
+    `<b>❓ Support & Help</b>\n━━━━━━━━━━━━━━━━━━\nHow can we help you today?\n\n💬 <i>Chat with our support team</i>\n📖 <i>Browse FAQs</i>`,
+    { reply_markup: inlineKeyboard([[urlButton('💬 Chat Support', 'https://t.me/RaushanKakhaura')], [cbButton('📖 FAQ', 'support_faq')], [cbButton('🔙 Back', 'main_menu')]]) }
   );
 }
 

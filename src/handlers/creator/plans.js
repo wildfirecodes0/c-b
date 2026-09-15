@@ -154,7 +154,8 @@ async function showCreatorPage(chatId, userId, creatorUsername) {
   let text=`👑 <b>${user.full_name}</b>${creator?.is_verified?' ✅':''}\n━━━━━━━━━━━━━━━━━━\n📢 <b>Channels:</b> ${channels.length}\n👥 <b>Total Members:</b> ${totalMembers}\n\n<b>Available Channels:</b>\n`;
   const buttons=[];
   channels.forEach((ch,i)=>{ const name=ch.username?`@${ch.username}`:ch.channel_name; text+=`\n${i+1}. ${name} — ${ch.total_members} members`; buttons.push([cbButton(`💎 Join ${ch.channel_name}`,`join_${ch.channel_id}`)]); });
-  buttons.push([cbButton('🔙 Back','main_menu')]);
+  // This page is only ever reached via a creator's shared public link (?start=creator_...) —
+  // there's no bot menu to go "back" to, so no Back/Main Menu button here.
   return sendMessage(chatId,text,{reply_markup:inlineKeyboard(buttons)});
 }
 

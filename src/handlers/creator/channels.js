@@ -72,9 +72,8 @@ async function showCreatorChannelDetail(chatId, userId, channelId, msgId) {
     `<i>Share this link with your audience to get subscribers!</i>`,
     { reply_markup: inlineKeyboard([
       [cbButton('💳 Renew Platform Membership', `renew_fee_${channelId}`)],
-      [cbButton('💎 Manage Plans', `creator_plans`), cbButton('➕ Add Plan', `add_plan_channel_${channelId}`)],
+      [cbButton('💎 Manage Plans', `creator_plans`)],
       [cbButton('✏️ Edit', `edit_channel_${channelId}`), cbButton('🗑 Delete', `delete_channel_${channelId}`)],
-      [cbButton('📤 Share Link', `share_channel_link_${channelId}`)],
       [cbButton('🔙 Back to List', 'creator_channels')],
     ]) }
   );

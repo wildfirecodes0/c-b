@@ -213,9 +213,13 @@ async function processSuccessfulPayment(session, paymentData, method) {
     if (user.referred_by) {
       const rewarded = await handleReferralReward(user.referred_by, user.user_id);
       if (rewarded) {
+        const { getUser } = require('../../db/index');
+        const referrer = await getUser(user.referred_by);
+        const unclaimed = referrer?.unclaimed_free_days || 0;
         await sendMessage(user.referred_by,
-          `🎁 <b>Referral Reward!</b>\n\nYour friend subscribed! You earned <b>1 free day</b> 🎉\n\n` +
-          `💡 <i>If you're a creator, this free day has been added automatically to your channel's platform fee — no payment needed for that day. Refer 4 friends = 4 free days!</i>`
+          `🎁 <b>Referral Reward!</b>\n\nYour friend subscribed! You've banked <b>1 more free day</b> 🎉\n\n` +
+          `💰 <b>Unclaimed Balance:</b> ${unclaimed} free day${unclaimed === 1 ? '' : 's'}\n\n` +
+          `💡 <i>If you're a creator, claim this anytime from your channel's "Renew Platform Fee" screen — it'll extend your membership by ${unclaimed} day${unclaimed === 1 ? '' : 's'} in one go, no payment needed!</i>`
         );
       }
     }

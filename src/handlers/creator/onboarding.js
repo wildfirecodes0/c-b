@@ -2,7 +2,7 @@
 const { getCreator, createCreator, setUserSession, getUserSession, clearUserSession, updateUser, createPlan, getBotSettings } = require('../../db/index');
 const { d1First, d1Run } = require('../../db/d1');
 const { editMessage, sendMessage, inlineKeyboard, cbButton, urlButton, getBotPermissions, getChat, getChatMemberCount } = require('../../utils/telegram');
-const { encrypt, generateToken } = require('../../utils/crypto');
+const { encrypt, generateToken, formatDate } = require('../../utils/crypto');
 
 async function showBecomeCreator(chatId, userId, msgId) {
   const creator = await getCreator(userId);
@@ -140,8 +140,18 @@ async function showPlanSetup(chatId, userId, msgId, channelId = null) {
 async function showPlatformFeePayment(chatId, userId, msgId) {
   const settings = await getBotSettings();
   const fee = (settings?.platform_fee || 4900) / 100;
-  return editMessage(chatId, msgId,
-    `<b>💰 Step 4/4 — Platform Fee</b>\n━━━━━━━━━━━━━━━━━━\n💰 <b>One Time Fee:</b> ₹${fee} per channel\n\nPay via:`,
+  const { getUser } = require('../../db/index');
+  const user = await getUser(userId);
+  const unclaimed = user?.unclaimed_free_days || 0;
+
+  let text = `<b>💰 Step 4/4 — Platform Fee</b>\n━━━━━━━━━━━━━━━━━━\n💰 <b>One Time Fee:</b> ₹${fee} per channel\n\n`;
+  if (unclaimed > 0) {
+    text += `<i>🎁 You have</i> <b>${unclaimed} free day${unclaimed === 1 ? '' : 's'}</b> <i>banked from referrals!</i>\n` +
+            `<i>Once this channel is live, claim them from its "Renew Platform Fee" screen to extend your membership for free.</i>\n\n`;
+  }
+  text += `Pay via:`;
+
+  return editMessage(chatId, msgId, text,
     { reply_markup: inlineKeyboard([
       [cbButton('💳 Pay via Razorpay', 'fee_pay_razorpay')],
       [cbButton('🪙 Pay via TRX', 'fee_pay_trx')],
@@ -276,12 +286,35 @@ async function showFeeRenewal(chatId, userId, channelId, msgId) {
   if (!ch) return;
   const settings = await getBotSettings();
   const fee = (settings?.platform_fee || 4900) / 100;
+  const { getUser } = require('../../db/index');
+  const user = await getUser(userId);
+  const unclaimed = user?.unclaimed_free_days || 0;
+
+  let text = `<b>💰 Renew Platform Fee</b>\n━━━━━━━━━━━━━━━━━━\n📢 <b>Channel:</b> ${ch.channel_name}\n💰 <b>Fee:</b> ₹${fee}\n\n`;
+  const buttons = [];
+  if (unclaimed > 0) {
+    text += `<i>🎁 You've earned</i> <b>${unclaimed} free day${unclaimed === 1 ? '' : 's'}</b> <i>from referring friends!</i>\n\n` +
+            `<b><u>💡 Refer more friends to stay free for longer!</u></b>\n\n`;
+    buttons.push([cbButton('🆓 Claim FREE Access', `claim_free_access_${channelId}`)]);
+  }
+  text += `Pay via:`;
+  buttons.push([cbButton('💳 Pay via Razorpay', `renew_fee_razorpay_${channelId}`)]);
+  buttons.push([cbButton('🪙 Pay via TRX', `renew_fee_trx_${channelId}`)]);
+  buttons.push([cbButton('🔙 Back', `creator_channel_detail_${channelId}`)]);
+
+  return editMessage(chatId, msgId, text, { reply_markup: inlineKeyboard(buttons) });
+}
+
+async function handleClaimFreeAccess(chatId, userId, channelId, msgId) {
+  const { claimFreeAccess } = require('../../db/index');
+  const result = await claimFreeAccess(userId, channelId);
+  if (!result.claimed) {
+    return showFeeRenewal(chatId, userId, channelId, msgId);
+  }
+  const ch = await d1First('SELECT channel_name FROM channels WHERE channel_id = ?', [channelId]);
   return editMessage(chatId, msgId,
-    `<b>💰 Renew Platform Fee</b>\n━━━━━━━━━━━━━━━━━━\n📢 <b>Channel:</b> ${ch.channel_name}\n💰 <b>Fee:</b> ₹${fee}\n\nPay via:`,
-    { reply_markup: inlineKeyboard([
-      [cbButton('💳 Pay via Razorpay', `renew_fee_razorpay_${channelId}`)],
-      [cbButton('🪙 Pay via TRX', `renew_fee_trx_${channelId}`)],
-    ]) }
+    `✅ <b>Free Access Claimed!</b>\n━━━━━━━━━━━━━━━━━━\n🎁 <b>${result.claimed} free day${result.claimed === 1 ? '' : 's'}</b> applied to <b>${ch?.channel_name}</b>!\n📅 <b>New Expiry:</b> ${formatDate(result.newExpiry)}\n\n<i>Your lifetime referral count is unaffected — keep referring to bank more free days!</i>`,
+    { reply_markup: inlineKeyboard([[cbButton('🔙 Back to Channel', `creator_channel_detail_${channelId}`)]]) }
   );
 }
 
@@ -308,5 +341,5 @@ async function initFeeRenewal(chatId, userId, channelId, msgId, method) {
 module.exports = {
   showBecomeCreator, startCreatorSetup, handleChannelInput, showGatewaySetup,
   showPlanSetup, showPlatformFeePayment, initPlatformFeePayment,
-  showFeeRenewal, initFeeRenewal,
+  showFeeRenewal, initFeeRenewal, handleClaimFreeAccess,
 };

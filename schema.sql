@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS users (
     session_message_id INTEGER,
     session_expiry INTEGER,
     api_key TEXT UNIQUE, -- 40-char key for external API / future web-app access
+    unclaimed_free_days INTEGER DEFAULT 0, -- referral days banked but not yet claimed on any channel
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );

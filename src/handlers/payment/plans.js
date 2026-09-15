@@ -16,11 +16,13 @@ async function showChannelPlans(chatId, userId, channelId, msgId = null) {
   const existing = await getSubscription(userId, channelId);
   if (existing) {
     const text = `✅ <b>Already Subscribed!</b>\n\nYou already have an active subscription to <b>${channel.channel_name}</b>.\n\n📅 <b>Expires:</b> ${require('../../utils/crypto').formatDate(existing.expires_at)}`;
-    const kb = inlineKeyboard([
-      [cbButton('🔄 Renew / Upgrade', `renew_sub_${channelId}`)],
-      [cbButton('💎 My Memberships', 'user_memberships')],
-      [cbButton('🔙 Back', 'main_menu')],
-    ]);
+    // Came in fresh via a shared join link -> no Back/Main Menu clutter, just the useful actions.
+    const rows = [[cbButton('🔄 Renew / Upgrade', `renew_sub_${channelId}`)]];
+    if (msgId) {
+      rows.push([cbButton('💎 My Memberships', 'user_memberships')]);
+      rows.push([cbButton('🔙 Back', 'main_menu')]);
+    }
+    const kb = inlineKeyboard(rows);
     if (msgId) return editMessage(chatId, msgId, text, { reply_markup: kb });
     return sendMessage(chatId, text, { reply_markup: kb });
   }
@@ -53,7 +55,10 @@ async function showChannelPlans(chatId, userId, channelId, msgId = null) {
   if (!trialUsed && trialPlan) {
     buttons.push([cbButton(`🎁 Free Trial — ${trialPlan.trial_days} Days`, `trial_${channelId}`)]);
   }
-  buttons.push([cbButton('🔙 Back', 'main_menu')]);
+  // Only add "Back to Main Menu" when the user got here by navigating inside the bot.
+  // A fresh visit via a shared join link (?start=join_...) has no menu to go "back" to,
+  // so that first screen stays just the plan choices.
+  if (msgId) buttons.push([cbButton('🔙 Back', 'main_menu')]);
 
   if (msgId) return editMessage(chatId, msgId, text, { reply_markup: inlineKeyboard(buttons) });
   return sendMessage(chatId, text, { reply_markup: inlineKeyboard(buttons) });
@@ -261,8 +266,10 @@ async function startTrial(chatId, userId, channelId, msgId = null) {
 
   const used = await hasUsedTrial(userId, channelId);
   if (used) {
-    return editMessage(chatId, msgId || 0, `❌ <b>Trial Already Used!</b>\n\nYou have already used your free trial for this channel.`,
-      { reply_markup: inlineKeyboard([[cbButton('💎 View Plans', `join_${channelId}`)]]) });
+    const text = `❌ <b>Trial Already Used!</b>\n\nYou have already used your free trial for this channel.`;
+    const kb = { reply_markup: inlineKeyboard([[cbButton('💎 View Plans', `join_${channelId}`)]]) };
+    if (msgId) return editMessage(chatId, msgId, text, kb);
+    return sendMessage(chatId, text, kb);
   }
 
   const now = Date.now();
