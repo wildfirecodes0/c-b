@@ -213,14 +213,32 @@ async function updateSubscription(id, fields) {
 // ============================================
 async function createPaymentSession(data) {
   const now = Date.now();
-  await d1Run(
-    `INSERT INTO payment_sessions (session_id, user_id, channel_id, plan_id, creator_user_id, amount, method, status, razorpay_link_id, trx_wallet, trx_amount_usdt, coupon_code, coupon_type, coupon_id, discount_amount, message_id, expires_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [data.sessionId, data.userId, data.channelId, data.planId, data.creatorUserId,
-     data.amount, data.method, data.razorpayLinkId || null, data.trxWallet || null,
-     data.trxAmountUsdt || null, data.couponCode || null, data.couponType || null,
-     data.couponId || null, data.discountAmount || 0, data.messageId || null, data.expiresAt, now, now]
-  );
+  // Try with message_id first; if column missing fall back without it
+  try {
+    await d1Run(
+      `INSERT INTO payment_sessions (session_id, user_id, channel_id, plan_id, creator_user_id, amount, method, status, razorpay_link_id, trx_wallet, trx_amount_usdt, coupon_code, coupon_type, coupon_id, discount_amount, message_id, expires_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [data.sessionId, data.userId, data.channelId, data.planId, data.creatorUserId,
+       data.amount, data.method, data.razorpayLinkId || null, data.trxWallet || null,
+       data.trxAmountUsdt || null, data.couponCode || null, data.couponType || null,
+       data.couponId || null, data.discountAmount || 0, data.messageId || null, data.expiresAt, now, now]
+    );
+  } catch (err) {
+    if (err.message && err.message.includes('no column named message_id')) {
+      // DB migration not yet applied — insert without message_id
+      console.warn('payment_sessions.message_id missing — inserting without it. Run: ALTER TABLE payment_sessions ADD COLUMN message_id INTEGER;');
+      await d1Run(
+        `INSERT INTO payment_sessions (session_id, user_id, channel_id, plan_id, creator_user_id, amount, method, status, razorpay_link_id, trx_wallet, trx_amount_usdt, coupon_code, coupon_type, coupon_id, discount_amount, expires_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [data.sessionId, data.userId, data.channelId, data.planId, data.creatorUserId,
+         data.amount, data.method, data.razorpayLinkId || null, data.trxWallet || null,
+         data.trxAmountUsdt || null, data.couponCode || null, data.couponType || null,
+         data.couponId || null, data.discountAmount || 0, data.expiresAt, now, now]
+      );
+    } else {
+      throw err;
+    }
+  }
 }
 
 async function getPaymentSession(sessionId) {

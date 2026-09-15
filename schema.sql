@@ -553,3 +553,12 @@ CREATE TABLE IF NOT EXISTS backup_log (
 -- ALTER TABLE users ADD COLUMN session_data TEXT;
 -- ALTER TABLE users ADD COLUMN session_message_id INTEGER;
 -- ALTER TABLE users ADD COLUMN session_expiry INTEGER;
+
+-- ============================================
+-- MIGRATION: Add missing columns to payment_sessions
+-- Run these manually in Cloudflare D1 dashboard if table already exists:
+-- ALTER TABLE payment_sessions ADD COLUMN message_id INTEGER;
+-- ALTER TABLE payment_sessions ADD COLUMN razorpay_payment_id TEXT;
+-- ALTER TABLE payment_sessions ADD COLUMN trx_txn_hash TEXT;
+-- ALTER TABLE payment_sessions ADD COLUMN retry_count INTEGER DEFAULT 0;
+-- ============================================
