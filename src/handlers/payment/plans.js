@@ -164,19 +164,25 @@ async function initRazorpayPayment(chatId, userId, planId, msgId) {
   }
 
   // Save payment session
-  await createPaymentSession({
-    sessionId, userId,
-    channelId: plan.channel_id,
-    planId: plan.id,
-    creatorUserId: plan.creator_user_id,
-    amount: finalAmount,
-    method: 'razorpay',
-    razorpayLinkId: linkRes.id,
-    couponCode: applied?.couponCode, couponType: applied?.couponType,
-    couponId: applied?.couponRecordId, discountAmount: applied?.discountAmount || 0,
-    messageId: msgId,
-    expiresAt,
-  });
+  try {
+    await createPaymentSession({
+      sessionId, userId,
+      channelId: plan.channel_id,
+      planId: plan.id,
+      creatorUserId: plan.creator_user_id,
+      amount: finalAmount,
+      method: 'razorpay',
+      razorpayLinkId: linkRes.id,
+      couponCode: applied?.couponCode, couponType: applied?.couponType,
+      couponId: applied?.couponRecordId, discountAmount: applied?.discountAmount || 0,
+      messageId: msgId,
+      expiresAt,
+    });
+  } catch (err) {
+    console.error('createPaymentSession (Razorpay) error:', err.message);
+    return editMessage(chatId, msgId, `❌ <b>DB Error:</b> ${err.message}\n\nPlease try again.`,
+      { reply_markup: inlineKeyboard([[cbButton('🔄 Try Again', `select_plan_${planId}`)]])} );
+  }
   if (applied) await clearUserSession(userId);
 
   const channelDisplay = channel?.username ? `@${channel.username}` : channel?.channel_name;
@@ -219,20 +225,26 @@ async function initTrxPayment(chatId, userId, planId, msgId) {
   const sessionId = generateToken(16);
   const expiresAt = Date.now() + 30 * 60 * 1000; // 30 min window
 
-  await createPaymentSession({
-    sessionId, userId,
-    channelId: plan.channel_id,
-    planId: plan.id,
-    creatorUserId: plan.creator_user_id,
-    amount: finalAmount,
-    method: 'trx',
-    trxWallet: creator.trx_wallet,
-    trxAmountUsdt: parseFloat(amountTrx), // stores TRX amount
-    couponCode: applied?.couponCode, couponType: applied?.couponType,
-    couponId: applied?.couponRecordId, discountAmount: applied?.discountAmount || 0,
-    messageId: msgId,
-    expiresAt,
-  });
+  try {
+    await createPaymentSession({
+      sessionId, userId,
+      channelId: plan.channel_id,
+      planId: plan.id,
+      creatorUserId: plan.creator_user_id,
+      amount: finalAmount,
+      method: 'trx',
+      trxWallet: creator.trx_wallet,
+      trxAmountUsdt: parseFloat(amountTrx), // stores TRX amount
+      couponCode: applied?.couponCode, couponType: applied?.couponType,
+      couponId: applied?.couponRecordId, discountAmount: applied?.discountAmount || 0,
+      messageId: msgId,
+      expiresAt,
+    });
+  } catch (err) {
+    console.error('createPaymentSession (TRX) error:', err.message);
+    return editMessage(chatId, msgId, `❌ <b>DB Error:</b> ${err.message}\n\nPlease try again.`,
+      { reply_markup: inlineKeyboard([[cbButton('🔙 Back', `select_plan_${planId}`)]])} );
+  }
   if (applied) await clearUserSession(userId);
 
   const channelDisplay = channel?.username ? `@${channel.username}` : channel?.channel_name;

@@ -10,6 +10,8 @@ async function handleCallback(cb) {
 
   await answerCallback(cb.id);
 
+  try {
+
   const user = await getUser(userId);
   if (!user) return;
 
@@ -543,6 +545,15 @@ async function handleCallback(cb) {
     return clearDripContent(chatId, userId, channelId, msgId);
   }
 
+  } catch (err) {
+    console.error('handleCallback error [' + data + ']:', err.message, err.stack);
+    try {
+      await editMessage(chatId, msgId,
+        `❌ <b>Something went wrong!</b>\n\n<i>${err.message || 'Unknown error'}</i>\n\nPlease try again.`,
+        { reply_markup: inlineKeyboard([[cbButton('🔙 Main Menu', 'main_menu')]]) }
+      );
+    } catch (e2) { /* editMessage itself failed */ }
+  }
 }
 
 module.exports = { handleCallback };

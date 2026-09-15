@@ -165,26 +165,32 @@ async function showPlatformFeePayment(chatId, userId, msgId) {
 // (invisible to subscribers) until the fee payment is confirmed —
 // see completePlatformFeePayment() in razorpay-webhook.js.
 async function initPlatformFeePayment(chatId, userId, msgId, method) {
-  const session = await getUserSession(userId);
-  const data = session?.data;
-  if (!data?.channelId || !data?.planType || !data?.price) {
-    return editMessage(chatId, msgId, `❌ <b>Session expired.</b> Please start again.`,
-      { reply_markup: inlineKeyboard([[cbButton('🔙 Start Over', 'user_become_creator')]]) });
+  try {
+    const session = await getUserSession(userId);
+    const data = session?.data;
+    if (!data?.channelId || !data?.planType || !data?.price) {
+      return editMessage(chatId, msgId, `❌ <b>Session expired.</b> Please start again.`,
+        { reply_markup: inlineKeyboard([[cbButton('🔙 Start Over', 'user_become_creator')]]) });
+    }
+
+    const settings = await getBotSettings();
+    const feeAmount = settings?.platform_fee || 4900; // paise
+
+    // ✅ NOTHING inserted into DB yet — all data stays in session until payment succeeds
+    const sessionId = generateToken(16);
+    const expiresAt = Date.now() + 30 * 60 * 1000;
+
+    return await createFeePaymentSession(chatId, userId, msgId, {
+      // Pass channel+plan data via session — DB insert happens only after payment success
+      channelId: data.channelId, channelName: data.channelName,
+      planId: null, // no plan in DB yet
+      feeAmount, sessionId, expiresAt, method, backCbData: 'creator_setup_fee',
+    });
+  } catch (err) {
+    console.error('initPlatformFeePayment error:', err.message);
+    return editMessage(chatId, msgId, `❌ <b>Error: ${err.message}</b>\n\nPlease try again.`,
+      { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'creator_setup_fee')]]) });
   }
-
-  const settings = await getBotSettings();
-  const feeAmount = settings?.platform_fee || 4900; // paise
-
-  // ✅ NOTHING inserted into DB yet — all data stays in session until payment succeeds
-  const sessionId = generateToken(16);
-  const expiresAt = Date.now() + 30 * 60 * 1000;
-
-  return createFeePaymentSession(chatId, userId, msgId, {
-    // Pass channel+plan data via session — DB insert happens only after payment success
-    channelId: data.channelId, channelName: data.channelName,
-    planId: null, // no plan in DB yet
-    feeAmount, sessionId, expiresAt, method, backCbData: 'creator_setup_fee',
-  });
 }
 
 // Shared by both first-time onboarding and later renewals — generates the
@@ -193,8 +199,11 @@ async function createFeePaymentSession(chatId, userId, msgId, opts) {
   const { channelId, channelName, planId, feeAmount, sessionId, expiresAt, method, backCbData } = opts;
   const { createPaymentSession, setUserSession } = require('../../db/index');
   // Store all channel+plan data in user session so webhook can create them after payment
-  const sessionData = await require('../../db/index').getUserSession(userId);
-  const pendingData = sessionData?.data || {};
+  let sessionData, pendingData;
+  try {
+    sessionData = await require('../../db/index').getUserSession(userId);
+  } catch (e) { console.error('getUserSession error:', e.message); }
+  pendingData = sessionData?.data || {};
 
   if (method === 'razorpay') {
     let linkRes;
@@ -229,16 +238,22 @@ async function createFeePaymentSession(chatId, userId, msgId, opts) {
         { reply_markup: inlineKeyboard([[cbButton('🔙 Back', backCbData)]]) });
     }
 
-    await createPaymentSession({
-      sessionId, userId, channelId, planId: planId || 0, creatorUserId: userId,
-      amount: feeAmount, method: 'razorpay', razorpayLinkId: linkRes.id, expiresAt,
-      // Store pending channel+plan data so webhook creates them after payment
-      couponCode: pendingData.channelName, // reuse field to store channelName
-      couponType: pendingData.planType,    // reuse field to store planType
-      couponId: pendingData.price,         // reuse field to store price
-      discountAmount: pendingData.trialDays || 0,
-      messageId: msgId,
-    });
+    try {
+      await createPaymentSession({
+        sessionId, userId, channelId, planId: planId || 0, creatorUserId: userId,
+        amount: feeAmount, method: 'razorpay', razorpayLinkId: linkRes.id, expiresAt,
+        // Store pending channel+plan data so webhook creates them after payment
+        couponCode: pendingData.channelName, // reuse field to store channelName
+        couponType: pendingData.planType,    // reuse field to store planType
+        couponId: pendingData.price,         // reuse field to store price
+        discountAmount: pendingData.trialDays || 0,
+        messageId: msgId,
+      });
+    } catch (err) {
+      console.error('createPaymentSession (Razorpay fee) error:', err.message);
+      return editMessage(chatId, msgId, `❌ <b>DB Error:</b> ${err.message}\n\nPlease try again.`,
+        { reply_markup: inlineKeyboard([[cbButton('🔙 Back', backCbData)]]) });
+    }
 
     return editMessage(chatId, msgId,
       `<b>💳 Complete Platform Fee Payment</b>\n━━━━━━━━━━━━━━━━━━\n` +
@@ -252,22 +267,29 @@ async function createFeePaymentSession(chatId, userId, msgId, opts) {
   if (method === 'trx') {
     const platformWallet = process.env.PLATFORM_TRX_WALLET;
     if (!platformWallet) {
-      return editMessage(chatId, msgId, `❌ <b>TRX payment is not available right now.</b>`,
+      return editMessage(chatId, msgId, `❌ <b>TRX payment is not available right now.</b>\n\n<i>PLATFORM_TRX_WALLET not configured.</i>`,
         { reply_markup: inlineKeyboard([[cbButton('🔙 Back', backCbData)]]) });
     }
     const { getTRXRate } = require('../../db/index');
-    const trxRate = await getTRXRate();
+    let trxRate = 10;
+    try { trxRate = await getTRXRate(); } catch (e) { console.error('getTRXRate error:', e.message); }
     const amountTrx = (feeAmount / 100 / trxRate).toFixed(2);
 
-    await createPaymentSession({
-      sessionId, userId, channelId, planId: planId || 0, creatorUserId: userId,
-      amount: feeAmount, method: 'trx', trxWallet: platformWallet, trxAmountUsdt: parseFloat(amountTrx), expiresAt,
-      couponCode: pendingData.channelName,
-      couponType: pendingData.planType,
-      couponId: pendingData.price,
-      discountAmount: pendingData.trialDays || 0,
-      messageId: msgId,
-    });
+    try {
+      await createPaymentSession({
+        sessionId, userId, channelId, planId: planId || 0, creatorUserId: userId,
+        amount: feeAmount, method: 'trx', trxWallet: platformWallet, trxAmountUsdt: parseFloat(amountTrx), expiresAt,
+        couponCode: pendingData.channelName,
+        couponType: pendingData.planType,
+        couponId: pendingData.price,
+        discountAmount: pendingData.trialDays || 0,
+        messageId: msgId,
+      });
+    } catch (err) {
+      console.error('createPaymentSession (TRX fee) error:', err.message);
+      return editMessage(chatId, msgId, `❌ <b>DB Error:</b> ${err.message}\n\nPlease try again.`,
+        { reply_markup: inlineKeyboard([[cbButton('🔙 Back', backCbData)]]) });
+    }
 
     return editMessage(chatId, msgId,
       `<b>🪙 TRX Platform Fee Payment</b>\n━━━━━━━━━━━━━━━━━━\n` +
@@ -321,23 +343,29 @@ async function handleClaimFreeAccess(chatId, userId, channelId, msgId) {
 }
 
 async function initFeeRenewal(chatId, userId, channelId, msgId, method) {
-  const ch = await d1First('SELECT * FROM channels WHERE channel_id = ? AND creator_user_id = ?', [channelId, userId]);
-  if (!ch) return;
-  const plan = await d1First('SELECT id FROM plans WHERE channel_id = ? ORDER BY id ASC LIMIT 1', [channelId]);
-  if (!plan) {
-    return editMessage(chatId, msgId, `❌ <b>No plan found for this channel.</b>`,
-      { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'creator_channels')]]) });
+  try {
+    const ch = await d1First('SELECT * FROM channels WHERE channel_id = ? AND creator_user_id = ?', [channelId, userId]);
+    if (!ch) return editMessage(chatId, msgId, `❌ <b>Channel not found.</b>`, { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'creator_channels')]]) });
+    const plan = await d1First('SELECT id FROM plans WHERE channel_id = ? ORDER BY id ASC LIMIT 1', [channelId]);
+    if (!plan) {
+      return editMessage(chatId, msgId, `❌ <b>No plan found for this channel.</b>`,
+        { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'creator_channels')]]) });
+    }
+
+    const settings = await getBotSettings();
+    const feeAmount = settings?.platform_fee || 4900;
+    const sessionId = generateToken(16);
+    const expiresAt = Date.now() + 30 * 60 * 1000;
+
+    return await createFeePaymentSession(chatId, userId, msgId, {
+      channelId, channelName: ch.channel_name, planId: plan.id,
+      feeAmount, sessionId, expiresAt, method, backCbData: `renew_fee_${channelId}`,
+    });
+  } catch (err) {
+    console.error('initFeeRenewal error:', err.message);
+    return editMessage(chatId, msgId, `❌ <b>Error: ${err.message}</b>\n\nPlease try again.`,
+      { reply_markup: inlineKeyboard([[cbButton('🔙 Back', `renew_fee_${channelId}`)]]) });
   }
-
-  const settings = await getBotSettings();
-  const feeAmount = settings?.platform_fee || 4900;
-  const sessionId = generateToken(16);
-  const expiresAt = Date.now() + 30 * 60 * 1000;
-
-  return createFeePaymentSession(chatId, userId, msgId, {
-    channelId, channelName: ch.channel_name, planId: plan.id,
-    feeAmount, sessionId, expiresAt, method, backCbData: `renew_fee_${channelId}`,
-  });
 }
 
 module.exports = {
