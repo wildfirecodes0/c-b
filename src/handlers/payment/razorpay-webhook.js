@@ -296,7 +296,7 @@ async function completePlatformFeePayment(session, method) {
       await sendMessage(session.creator_user_id,
         `<b>✅ Platform Fee Renewed!</b>\n━━━━━━━━━━━━━━━━━━\n` +
         `📢 <b>Channel:</b> ${channel?.channel_name}\n` +
-        `📅 <b>Valid Till:</b> ${formatDate(expiresAt)}\n\n` +
+        `📅 <b>Valid Till:</b> ${formatDate(feeExpiresAt)}\n\n` +
         `Your channel is active again — new subscriptions are now open! 🎉`,
         { reply_markup: inlineKeyboard([[cbButton('📊 Go to Dashboard', 'creator_dashboard')]]) }
       );

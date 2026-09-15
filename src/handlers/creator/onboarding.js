@@ -223,7 +223,9 @@ async function createFeePaymentSession(chatId, userId, msgId, opts) {
         { reply_markup: inlineKeyboard([[cbButton('🔙 Back', backCbData)]]) });
     }
     if (!linkRes?.id) {
-      return editMessage(chatId, msgId, `❌ <b>Payment link creation failed!</b>\n\nPlease try again.`,
+      const errDetail = linkRes?.error?.description || linkRes?.error?.code || JSON.stringify(linkRes || {});
+      console.error('Platform fee Razorpay link creation failed:', errDetail);
+      return editMessage(chatId, msgId, `❌ <b>Payment link creation failed!</b>\n\n<i>${errDetail}</i>\n\nPlease try again.`,
         { reply_markup: inlineKeyboard([[cbButton('🔙 Back', backCbData)]]) });
     }
 
