@@ -64,10 +64,15 @@ async function showMemberDetail(chatId, userId, subId, msgId) {
 }
 
 async function extendMember(chatId, userId, subId, msgId) {
-  const sub = await d1First('SELECT * FROM subscriptions WHERE id=? AND creator_user_id=?',[subId,userId]);
+  const sub = await d1First('SELECT s.*, c.channel_name FROM subscriptions s JOIN channels c ON s.channel_id=c.channel_id WHERE s.id=? AND s.creator_user_id=?',[subId,userId]);
   if (!sub) return;
   const newExpiry = sub.expires_at + 30*24*60*60*1000;
-  await d1Run('UPDATE subscriptions SET expires_at=?, grace_until=?, updated_at=? WHERE id=?',[newExpiry, newExpiry+24*60*60*1000, Date.now(), subId]);
+  await d1Run('UPDATE subscriptions SET expires_at=?, grace_until=?, status=?, updated_at=? WHERE id=?',[newExpiry, newExpiry+24*60*60*1000, 'active', Date.now(), subId]);
+  try {
+    await sendMessage(sub.user_id,
+      `🎉 <b>Membership Extended!</b>\n━━━━━━━━━━━━━━━━━━\n📢 <b>Channel:</b> ${sub.channel_name}\n💥 <b>New Expiry:</b> ${formatDate(newExpiry)}\n\n<i>Your creator has extended your membership by 30 days — no payment needed!</i>`
+    );
+  } catch (e) { console.error('extendMember notify error:', e.message); }
   return editMessage(chatId,msgId,`✅ <b>Membership Extended!</b>\n\nNew expiry: ${formatDate(newExpiry)}`,{reply_markup:inlineKeyboard([[cbButton('🔙 Back',`member_detail_${subId}`)]])});
 }
 
@@ -130,35 +135,13 @@ async function showCreatorSettings(chatId, userId, msgId) {
     {reply_markup:inlineKeyboard([
       [cbButton('💳 Update Razorpay Keys','settings_update_razorpay')],
       [cbButton('🪙 Update TRX Wallet','settings_update_trx')],
-      [cbButton('🎟 My Coupons','creator_coupons')],
       [cbButton('👋 Welcome Messages','welcome_messages')],
       [cbButton('⏰ Drip Content','drip_content')],
+      [cbButton('🔑 API Key','api_key_view_creator')],
       [cbButton('🔔 Toggle Notifications','settings_toggle_notif')],
       [cbButton('🔙 Back','creator_menu')],
     ])}
   );
-}
-
-async function showCreatorCoupons(chatId, userId, msgId) {
-  const coupons = await d1All('SELECT c.*, ch.channel_name FROM coupons c JOIN channels ch ON c.channel_id = ch.channel_id WHERE c.creator_user_id = ? ORDER BY c.created_at DESC LIMIT 20', [userId]);
-  let text = `<b>🎟 My Coupons</b>\n━━━━━━━━━━━━━━━━━━\n`;
-  if (!coupons.length) text += `<i>No coupons yet. Create one to offer discounts on your plans!</i>`;
-  else {
-    text += coupons.map(c => {
-      const val = c.discount_type === 'percent' ? `${c.discount_value}%` : `₹${c.discount_value/100}`;
-      return `🎟 <code>${c.code}</code> — ${val} off — ${c.channel_name}\n   Used: ${c.used_count}${c.max_uses ? `/${c.max_uses}` : ''}`;
-    }).join('\n\n');
-  }
-  return editMessage(chatId, msgId, text, { reply_markup: inlineKeyboard([[cbButton('➕ Create New', 'creator_coupon_create')], [cbButton('🔙 Back', 'creator_settings')]]) });
-}
-
-async function showCreatorCouponChannelSelect(chatId, userId, msgId) {
-  const channels = await d1All('SELECT channel_id, channel_name FROM channels WHERE creator_user_id = ?', [userId]);
-  if (!channels.length) {
-    return editMessage(chatId, msgId, `❌ <b>You need at least one channel to create a coupon.</b>`, { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'creator_coupons')]]) });
-  }
-  return editMessage(chatId, msgId, `<b>🎟 Create Coupon</b>\n━━━━━━━━━━━━━━━━━━\n📢 <b>Select a channel:</b>`,
-    { reply_markup: inlineKeyboard([...channels.map(c => [cbButton(c.channel_name, `coupon_channel_${c.channel_id}`)]), [cbButton('🔙 Cancel', 'creator_coupons')]]) });
 }
 
 // ---- PUBLIC PAGE ----
@@ -195,4 +178,4 @@ async function togglePlanActive(chatId, userId, planId, msgId) {
   return showPlanDetail(chatId, userId, planId, msgId);
 }
 
-module.exports = { showCreatorPlans, showAddPlanChannelSelect, showPlanDetail, togglePlanActive, showCreatorMembers, showMemberDetail, extendMember, removeMember, showCreatorPayments, showCreatorPaymentDetail, downloadCreatorPaymentsPDF, showCreatorSettings, showCreatorCoupons, showCreatorCouponChannelSelect, showCreatorPage };
+module.exports = { showCreatorPlans, showAddPlanChannelSelect, showPlanDetail, togglePlanActive, showCreatorMembers, showMemberDetail, extendMember, removeMember, showCreatorPayments, showCreatorPaymentDetail, downloadCreatorPaymentsPDF, showCreatorSettings, showCreatorPage };

@@ -86,6 +86,14 @@ async function handleCallback(cb) {
     const { showProfile } = require('./user/menu');
     return showProfile(chatId, userId, msgId);
   }
+  if (data.startsWith('api_key_view_')) {
+    const { showApiKey } = require('./apikey');
+    return showApiKey(chatId, userId, msgId, data.replace('api_key_view_', ''));
+  }
+  if (data.startsWith('api_key_regen_')) {
+    const { handleRegenerateApiKey } = require('./apikey');
+    return handleRegenerateApiKey(chatId, userId, msgId, data.replace('api_key_regen_', ''));
+  }
   if (data === 'user_support') {
     const { showSupport } = require('./user/menu');
     return showSupport(chatId, userId, msgId);
@@ -492,29 +500,6 @@ async function handleCallback(cb) {
     return editMessage(chatId, msgId,
       `✅ Type: <b>${type === 'percent' ? 'Percentage' : 'Flat Amount'}</b>\n\n✏️ <b>Enter the ${type === 'percent' ? 'discount %' : 'discount amount in ₹'}:</b>`,
       { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'admin_promo_codes')]]) });
-  }
-  if (data === 'creator_coupons') {
-    const { showCreatorCoupons } = require('./creator/plans');
-    return showCreatorCoupons(chatId, userId, msgId);
-  }
-  if (data === 'creator_coupon_create') {
-    const { showCreatorCouponChannelSelect } = require('./creator/plans');
-    return showCreatorCouponChannelSelect(chatId, userId, msgId);
-  }
-  if (data.startsWith('coupon_channel_')) {
-    const channelId = parseInt(data.replace('coupon_channel_', ''));
-    await setUserSession(userId, 'creator_coupon_code', { channelId }, msgId);
-    return editMessage(chatId, msgId,
-      `<b>🎟 Create Coupon</b>\n━━━━━━━━━━━━━━━━━━\n✏️ <b>Enter the code</b> (e.g. SAVE20):`,
-      { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'creator_coupons')]]) });
-  }
-  if (data.startsWith('coupon_type_')) {
-    const type = data.replace('coupon_type_', '');
-    const session = await require('../db/index').getUserSession(userId);
-    await setUserSession(userId, 'creator_coupon_value', { ...session?.data, type }, msgId);
-    return editMessage(chatId, msgId,
-      `✅ Type: <b>${type === 'percent' ? 'Percentage' : 'Flat Amount'}</b>\n\n✏️ <b>Enter the ${type === 'percent' ? 'discount %' : 'discount amount in ₹'}:</b>`,
-      { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'creator_coupons')]]) });
   }
   if (data === 'admin_toggle_maintenance') {
     const { toggleMaintenance } = require('./admin/settings');

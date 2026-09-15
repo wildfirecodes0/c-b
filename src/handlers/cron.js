@@ -71,8 +71,8 @@ async function checkExpiringSubscriptions() {
   }
 
   const expired = await d1All(
-    `SELECT s.id, s.user_id, s.channel_id, s.expires_at, c.channel_name
-     FROM subscriptions s JOIN channels c ON s.channel_id = c.channel_id
+    `SELECT s.id, s.user_id, s.channel_id, s.expires_at, s.is_trial, s.creator_user_id, c.channel_name, u.full_name
+     FROM subscriptions s JOIN channels c ON s.channel_id = c.channel_id JOIN users u ON s.user_id = u.user_id
      WHERE s.status = 'active' AND s.grace_until <= ?`, [now]
   );
   for (const sub of expired) {
@@ -85,6 +85,17 @@ async function checkExpiringSubscriptions() {
     );
     const admin = await getAdmin();
     if (admin) await sendMessage(admin.user_id, `🚫 <b>Member Auto Kicked!</b>\n👤 <code>${sub.user_id}</code>\n📢 ${sub.channel_name}`);
+    if (sub.creator_user_id) {
+      const kind = sub.is_trial ? '🎁 Free Trial' : '💎 Subscription';
+      try {
+        await sendMessage(sub.creator_user_id,
+          `🚫 <b>Member Removed!</b>\n━━━━━━━━━━━━━━━━━━\n` +
+          `👤 <b>User:</b> ${sub.full_name || 'Unknown'}\n🆔 <code>${sub.user_id}</code>\n` +
+          `📢 <b>Channel:</b> ${sub.channel_name}\n📋 <b>Type:</b> ${kind} expired\n\n` +
+          `Their access was automatically removed. They can renew anytime to rejoin.`
+        );
+      } catch (e) { console.error('Creator expiry notify error:', e.message); }
+    }
   }
 }
 

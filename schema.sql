@@ -48,6 +48,11 @@ CREATE TABLE IF NOT EXISTS users (
     notify_announcements INTEGER DEFAULT 1,
     data_delete_requested INTEGER DEFAULT 0,
     data_delete_requested_at INTEGER,
+    session_step TEXT,
+    session_data TEXT, -- JSON
+    session_message_id INTEGER,
+    session_expiry INTEGER,
+    api_key TEXT UNIQUE, -- 40-char key for external API / future web-app access
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );
@@ -106,6 +111,8 @@ CREATE TABLE IF NOT EXISTS channels (
     platform_fee_paid INTEGER DEFAULT 0,
     platform_fee_expires_at INTEGER,
     fee_reminder_sent INTEGER DEFAULT 0,
+    welcome_message TEXT,
+    drip_content TEXT, -- JSON array of {day, message}
     stats_public INTEGER DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
@@ -154,6 +161,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     reminder_3day_sent INTEGER DEFAULT 0,
     reminder_1day_sent INTEGER DEFAULT 0,
     grace_reminder_sent INTEGER DEFAULT 0,
+    drip_sent INTEGER DEFAULT 0, -- highest drip-content day already sent
     cancelled_at INTEGER,
     cancel_reason TEXT,
     cancel_feedback TEXT,
@@ -189,6 +197,7 @@ CREATE TABLE IF NOT EXISTS payment_sessions (
     coupon_type TEXT, -- 'coupon' (creator) or 'promo' (admin)
     coupon_id INTEGER,
     discount_amount INTEGER DEFAULT 0, -- paise saved
+    message_id INTEGER, -- the "Complete Payment" prompt message, deleted once payment succeeds
     expires_at INTEGER NOT NULL,
     retry_count INTEGER DEFAULT 0,
     created_at INTEGER NOT NULL,

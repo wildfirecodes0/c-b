@@ -17,10 +17,11 @@ async function getUser(userId) {
 
 async function createUser(data) {
   const now = Date.now();
+  const apiKey = generateToken(40);
   await d1Run(
-    `INSERT INTO users (user_id, username, full_name, language, role, tos_accepted, referral_code, referred_by, created_at, updated_at)
-     VALUES (?, ?, ?, 'en', 'user', 0, ?, ?, ?, ?)`,
-    [data.userId, data.username || null, data.fullName, data.referralCode, data.referredBy || null, now, now]
+    `INSERT INTO users (user_id, username, full_name, language, role, tos_accepted, referral_code, referred_by, api_key, created_at, updated_at)
+     VALUES (?, ?, ?, 'en', 'user', 0, ?, ?, ?, ?, ?)`,
+    [data.userId, data.username || null, data.fullName, data.referralCode, data.referredBy || null, apiKey, now, now]
   );
   if (data.referredBy) {
     await d1Run(
@@ -29,6 +30,44 @@ async function createUser(data) {
     );
   }
   return getUser(data.userId);
+}
+
+// Returns the user's API key, generating one on the fly for older accounts
+// created before this feature existed (lazy backfill — no manual migration needed).
+async function getOrCreateApiKey(userId) {
+  const user = await getUser(userId);
+  if (!user) return null;
+  if (user.api_key) return user.api_key;
+  let apiKey;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    apiKey = generateToken(40);
+    try {
+      await d1Run('UPDATE users SET api_key = ?, updated_at = ? WHERE user_id = ?', [apiKey, Date.now(), userId]);
+      cache.del(`user:${userId}`);
+      return apiKey;
+    } catch (e) {
+      // extremely unlikely UNIQUE collision — retry with a fresh key
+    }
+  }
+  throw new Error('Failed to generate a unique API key');
+}
+
+async function regenerateApiKey(userId) {
+  let apiKey;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    apiKey = generateToken(40);
+    try {
+      await d1Run('UPDATE users SET api_key = ?, updated_at = ? WHERE user_id = ?', [apiKey, Date.now(), userId]);
+      cache.del(`user:${userId}`);
+      return apiKey;
+    } catch (e) {}
+  }
+  throw new Error('Failed to generate a unique API key');
+}
+
+async function getUserByApiKey(apiKey) {
+  if (!apiKey) return null;
+  return d1First('SELECT * FROM users WHERE api_key = ?', [apiKey]);
 }
 
 async function updateUser(userId, fields) {
@@ -175,12 +214,12 @@ async function updateSubscription(id, fields) {
 async function createPaymentSession(data) {
   const now = Date.now();
   await d1Run(
-    `INSERT INTO payment_sessions (session_id, user_id, channel_id, plan_id, creator_user_id, amount, method, status, razorpay_link_id, trx_wallet, trx_amount_usdt, coupon_code, coupon_type, coupon_id, discount_amount, expires_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO payment_sessions (session_id, user_id, channel_id, plan_id, creator_user_id, amount, method, status, razorpay_link_id, trx_wallet, trx_amount_usdt, coupon_code, coupon_type, coupon_id, discount_amount, message_id, expires_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [data.sessionId, data.userId, data.channelId, data.planId, data.creatorUserId,
      data.amount, data.method, data.razorpayLinkId || null, data.trxWallet || null,
      data.trxAmountUsdt || null, data.couponCode || null, data.couponType || null,
-     data.couponId || null, data.discountAmount || 0, data.expiresAt, now, now]
+     data.couponId || null, data.discountAmount || 0, data.messageId || null, data.expiresAt, now, now]
   );
 }
 
@@ -521,6 +560,7 @@ async function getUSDTRate() {
 
 module.exports = {
   getUser, createUser, updateUser,
+  getOrCreateApiKey, regenerateApiKey, getUserByApiKey,
   getCreator, createCreator, updateCreator,
   getChannel, createChannel, updateChannel, getCreatorChannels,
   getPlan, getChannelPlans, createPlan,

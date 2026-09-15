@@ -60,49 +60,6 @@ async function handleSessionInput(msg, session) {
       { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'admin_promo_codes')]]) });
   }
 
-  if (step === 'creator_coupon_code') {
-    const code = text.trim().toUpperCase();
-    if (!/^[A-Z0-9]{3,20}$/.test(code)) {
-      return editMessage(chatId, msgId, `❌ <b>Invalid code!</b> Use 3-20 letters/numbers only.`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'creator_coupons')]]) });
-    }
-    const existing = await d1First('SELECT id FROM coupons WHERE code = ?', [code]);
-    if (existing) {
-      return editMessage(chatId, msgId, `❌ <b>Code already exists!</b> Try a different one:`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'creator_coupons')]]) });
-    }
-    await setUserSession(userId, 'creator_coupon_type_pending', { ...data, code }, msgId);
-    return editMessage(chatId, msgId, `✅ Code: <code>${code}</code>\n\n<b>Choose discount type:</b>`,
-      { reply_markup: inlineKeyboard([[cbButton('% Percentage', 'coupon_type_percent'), cbButton('₹ Flat Amount', 'coupon_type_flat')], [cbButton('🔙 Cancel', 'creator_coupons')]]) });
-  }
-
-  if (step === 'creator_coupon_value') {
-    const value = parseInt(text);
-    if (isNaN(value) || value < 1) return editMessage(chatId, msgId, `❌ <b>Invalid value!</b> Enter a number:`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'creator_coupons')]]) });
-    await setUserSession(userId, 'creator_coupon_maxuses', { ...data, value }, msgId);
-    return editMessage(chatId, msgId, `✅ Value saved!\n\n👥 <b>Max total uses?</b>\n📌 <i>Enter 0 for unlimited</i>`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'creator_coupons')]]) });
-  }
-
-  if (step === 'creator_coupon_maxuses') {
-    const maxUses = parseInt(text);
-    if (isNaN(maxUses) || maxUses < 0) return editMessage(chatId, msgId, `❌ Invalid! Enter 0 or more:`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'creator_coupons')]]) });
-    await setUserSession(userId, 'creator_coupon_expiry', { ...data, maxUses }, msgId);
-    return editMessage(chatId, msgId, `✅ Saved!\n\n📅 <b>Expires in how many days?</b>\n📌 <i>Enter 0 for never</i>`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'creator_coupons')]]) });
-  }
-
-  if (step === 'creator_coupon_expiry') {
-    const days = parseInt(text);
-    if (isNaN(days) || days < 0) return editMessage(chatId, msgId, `❌ Invalid! Enter 0 or more:`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'creator_coupons')]]) });
-    const now = Date.now();
-    const discountValue = data.type === 'percent' ? data.value : data.value * 100;
-    await d1Run(
-      `INSERT INTO coupons (code, creator_user_id, channel_id, discount_type, discount_value, max_uses, expires_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [data.code, userId, data.channelId, data.type, discountValue, data.maxUses || null, days > 0 ? now + days * 86400000 : null, now, now]
-    );
-    await clearUserSession(userId);
-    return editMessage(chatId, msgId,
-      `✅ <b>Coupon Created!</b>\n\n🎟 <code>${data.code}</code>\n💰 ${data.type === 'percent' ? `${data.value}% off` : `₹${data.value} off`}\n👥 Max uses: ${data.maxUses || 'Unlimited'}\n📅 Expires: ${days > 0 ? `${days} days` : 'Never'}`,
-      { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'creator_coupons')]]) });
-  }
-
   if (step === 'enter_coupon_code') {
     const { validateDiscountCode } = require('../db/index');
     const plan = await d1First('SELECT * FROM plans WHERE id=?', [data.planId]);

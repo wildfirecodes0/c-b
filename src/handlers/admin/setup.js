@@ -187,7 +187,7 @@ async function showAdminSettings(chatId, userId, msgId) {
   const settings = await getBotSettings();
   return editMessage(chatId,msgId,
     `<b>⚙️ Admin Settings</b>\n━━━━━━━━━━━━━━━━━━\n🤖 <b>Bot Status:</b> ${settings?.maintenance_mode?'🔧 Maintenance':'✅ Online'}\n💰 <b>Platform Fee:</b> ₹${(settings?.platform_fee||4900)/100}/channel\n📊 <b>Commission:</b> ${settings?.commission_percent||5}%\n🛡 <b>Maintenance Mode:</b> ${settings?.maintenance_mode?'✅ On':'❌ Off'}\n📦 <b>Bot Version:</b> ${settings?.bot_version||'1.0.0'}`,
-    {reply_markup:inlineKeyboard([[cbButton('💰 Change Platform Fee','admin_change_fee')],[cbButton('📊 Change Commission %','admin_change_commission')],[cbButton('🎟 Promo Codes','admin_promo_codes')],[cbButton('🛡 Toggle Maintenance','admin_toggle_maintenance')],[cbButton('🔙 Back','admin_menu')]])}
+    {reply_markup:inlineKeyboard([[cbButton('💰 Change Platform Fee','admin_change_fee')],[cbButton('📊 Change Commission %','admin_change_commission')],[cbButton('🎟 Promo Codes','admin_promo_codes')],[cbButton('🔑 My API Key','api_key_view_admin')],[cbButton('🛡 Toggle Maintenance','admin_toggle_maintenance')],[cbButton('🔙 Back','admin_menu')]])}
   );
 }
 

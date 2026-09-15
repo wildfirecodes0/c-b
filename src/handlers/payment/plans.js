@@ -169,6 +169,7 @@ async function initRazorpayPayment(chatId, userId, planId, msgId) {
     razorpayLinkId: linkRes.id,
     couponCode: applied?.couponCode, couponType: applied?.couponType,
     couponId: applied?.couponRecordId, discountAmount: applied?.discountAmount || 0,
+    messageId: msgId,
     expiresAt,
   });
   if (applied) await clearUserSession(userId);
@@ -224,6 +225,7 @@ async function initTrxPayment(chatId, userId, planId, msgId) {
     trxAmountUsdt: parseFloat(amountTrx), // stores TRX amount
     couponCode: applied?.couponCode, couponType: applied?.couponType,
     couponId: applied?.couponRecordId, discountAmount: applied?.discountAmount || 0,
+    messageId: msgId,
     expiresAt,
   });
   if (applied) await clearUserSession(userId);
@@ -266,7 +268,8 @@ async function startTrial(chatId, userId, channelId, msgId = null) {
   const now = Date.now();
   const expiresAt = now + trialPlan.trial_days * 24 * 60 * 60 * 1000;
 
-  const { markTrialUsed, createSubscription } = require('../../db/index');
+  const { markTrialUsed, createSubscription, getUser } = require('../../db/index');
+  const { d1Run } = require('../../db/d1');
   await markTrialUsed(userId, channelId, expiresAt);
   await createSubscription({
     userId, channelId, planId: trialPlan.id,
@@ -276,9 +279,28 @@ async function startTrial(chatId, userId, channelId, msgId = null) {
     expiresAt,
     graceUntil: expiresAt + 24 * 60 * 60 * 1000,
   });
+  await d1Run('UPDATE channels SET total_members = total_members + 1, updated_at = ? WHERE channel_id = ?', [now, channelId]);
 
   const inviteResult = await createInviteLink(channelId, 300);
   const inviteLink = inviteResult.result?.invite_link;
+
+  const user = await getUser(userId);
+
+  // Send the creator's welcome message, if they've set one — same as a paid join.
+  try {
+    const { sendWelcomeMessage } = require('../creator/welcome');
+    await sendWelcomeMessage(channel, user, expiresAt);
+  } catch (e) { console.error('Trial welcome message error:', e.message); }
+
+  // Notify the creator that a new (trial) member has joined.
+  try {
+    await sendMessage(trialPlan.creator_user_id,
+      `🎁 <b>New Free Trial Started!</b>\n━━━━━━━━━━━━━━━━━━\n` +
+      `👤 <b>User:</b> ${user?.full_name || 'Unknown'}\n🆔 <code>${userId}</code>\n` +
+      `📢 <b>Channel:</b> ${channel.channel_name}\n⏰ <b>Trial:</b> ${trialPlan.trial_days} days\n` +
+      `💥 <b>Expires:</b> ${formatDate(expiresAt)}`
+    );
+  } catch (e) { console.error('Trial creator notify error:', e.message); }
 
   const text =
     `🎁 <b>Free Trial Activated!</b>\n━━━━━━━━━━━━━━━━━━\n` +
@@ -288,7 +310,7 @@ async function startTrial(chatId, userId, channelId, msgId = null) {
     `🔗 <b>Your Join Link:</b>\n<code>${inviteLink}</code>\n\n` +
     `⚠️ <i>This link will expire in 5 minutes and can only be used once!</i>`;
 
-  const kb = inlineKeyboard([[{ text: '🔗 Join Now', url: inviteLink }], [cbButton('🔙 Back', 'main_menu')]]);
+  const kb = inlineKeyboard([[{ text: '🔗 Join Now', url: inviteLink }]]);
 
   if (msgId) return editMessage(chatId, msgId, text, { reply_markup: kb });
   return sendMessage(chatId, text, { reply_markup: kb });

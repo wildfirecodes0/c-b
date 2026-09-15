@@ -11,8 +11,8 @@ async function showCreatorMenu(chatId, userId, msgId = null) {
   const text = `✨ <b>Crevio Bot</b>${badge} — Choose an option 👇`;
   const kb = inlineKeyboard([
     [cbButton('📊 Dashboard', 'creator_dashboard'), cbButton('📈 Analytics', 'creator_analytics')],
-    [cbButton('📢 Channels', 'creator_channels'), cbButton('💎 Plans', 'creator_plans')],
-    [cbButton('👥 Members', 'creator_members'), cbButton('💰 Payments', 'creator_payments')],
+    [cbButton('📢 Channels', 'creator_channels'), cbButton('👥 Members', 'creator_members')],
+    [cbButton('💰 Payments', 'creator_payments')],
     [cbButton('📋 Export Members', 'export_members_csv'), cbButton('⚙️ Settings', 'creator_settings')],
     [cbButton('➕ Add New Channel', 'creator_start_setup')],
     [cbButton('❓ Help & Support', 'creator_support')],

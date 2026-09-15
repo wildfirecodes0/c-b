@@ -225,6 +225,7 @@ async function createFeePaymentSession(chatId, userId, msgId, opts) {
       couponType: pendingData.planType,    // reuse field to store planType
       couponId: pendingData.price,         // reuse field to store price
       discountAmount: pendingData.trialDays || 0,
+      messageId: msgId,
     });
 
     return editMessage(chatId, msgId,
@@ -253,6 +254,7 @@ async function createFeePaymentSession(chatId, userId, msgId, opts) {
       couponType: pendingData.planType,
       couponId: pendingData.price,
       discountAmount: pendingData.trialDays || 0,
+      messageId: msgId,
     });
 
     return editMessage(chatId, msgId,

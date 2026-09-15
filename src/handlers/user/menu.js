@@ -26,7 +26,7 @@ async function showProfile(chatId, userId, msgId) {
   const activeSubs = await d1First("SELECT COUNT(*) as c FROM subscriptions WHERE user_id = ? AND status = 'active'", [userId]);
   return editMessage(chatId, msgId,
     `<b>👤 My Profile</b>\n━━━━━━━━━━━━━━━━━━\n🆔 <b>ID:</b> <code>${user.user_id}</code>\n👤 <b>Name:</b> ${user.full_name}\n📅 <b>Joined:</b> ${formatDate(user.created_at)}\n💎 <b>Active Plans:</b> ${activeSubs?.c || 0}\n🎁 <b>Referrals:</b> ${user.free_days_earned || 0} free days earned`,
-    { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'main_menu')]]) }
+    { reply_markup: inlineKeyboard([[cbButton('🔑 API Key', 'api_key_view_user')], [cbButton('🔙 Back', 'main_menu')]]) }
   );
 }
 

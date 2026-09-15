@@ -8,7 +8,7 @@ const {
   getChannel, getPlan, getUser,
   handleReferralReward, getAdmin, getCreator,
 } = require('../../db/index');
-const { sendMessage, createInviteLink, inlineKeyboard, cbButton } = require('../../utils/telegram');
+const { sendMessage, createInviteLink, inlineKeyboard, cbButton, deleteMessage } = require('../../utils/telegram');
 const { notifyAdmin } = require('../user/start');
 
 async function handleRazorpayWebhook(req) {
@@ -103,6 +103,11 @@ async function processSuccessfulPayment(session, paymentData, method) {
   try {
     if (session.user_id === session.creator_user_id) {
       return completePlatformFeePayment(session, method);
+    }
+
+    // Delete the old "Complete Payment" prompt — the success message below replaces it.
+    if (session.message_id) {
+      try { await deleteMessage(session.user_id, session.message_id); } catch (e) {}
     }
 
     const [plan, channel, user] = await Promise.all([
@@ -223,6 +228,11 @@ async function completePlatformFeePayment(session, method) {
   try {
     const now = Date.now();
     const feeExpiresAt = now + 30 * 24 * 60 * 60 * 1000;
+
+    // Delete the old "Complete Platform Fee Payment" prompt.
+    if (session.message_id) {
+      try { await deleteMessage(session.user_id, session.message_id); } catch (e) {}
+    }
 
     const { updateUser, getUser, getChannel, getPlan, createCreator, createPlan } = require('../../db/index');
 

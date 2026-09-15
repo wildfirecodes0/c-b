@@ -4,6 +4,7 @@ const express = require('express');
 const { handleUpdate } = require('./handlers/update');
 const { handleRazorpayWebhook } = require('./handlers/payment/razorpay-webhook');
 const { startCronJobs } = require('./handlers/cron');
+const apiRouter = require('./api');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -12,6 +13,11 @@ app.use('/webhook/razorpay', express.raw({ type: 'application/json' }));
 app.use(express.json());
 
 app.get('/health', (req, res) => res.json({ status: 'ok', version: '1.0.0', timestamp: Date.now() }));
+
+// Public REST API — authenticated per-request via the user's 40-char API key.
+// Used by the upcoming Crevio web app; mirrors the bot's own data exactly.
+app.use('/api/v1', apiRouter);
+
 
 app.post('/webhook', async (req, res) => {
   try {

@@ -12,11 +12,15 @@ async function showCreatorChannels(chatId, userId, page, msgId) {
       { reply_markup: inlineKeyboard([[cbButton('➕ Add New Channel', 'creator_start_setup')], [cbButton('🔙 Back', 'creator_menu')]]) });
   }
   let text = `<b>📢 Your Channels</b>\n━━━━━━━━━━━━━━━━━━\n`;
+  const now = Date.now();
   channels.forEach((ch, i) => {
     const num = (page-1)*10+i+1;
     const status = ch.is_suspended ? '🚫 Suspended' : ch.is_paused ? '⏸ Paused' : '✅ Active';
+    const feeWarning = (!ch.platform_fee_expires_at || ch.platform_fee_expires_at <= now)
+      ? ' 🔴'
+      : (ch.platform_fee_expires_at <= now + 3*24*60*60*1000 ? ' ⚠️' : '');
     const name = ch.username ? `@${ch.username}` : ch.channel_name;
-    text += `\n<b>${num}.</b> <i>${name}</i> -> <b>${status}</b>`;
+    text += `\n<b>${num}.</b> <i>${name}</i> -> <b>${status}</b>${feeWarning}`;
   });
   const buttons = []; const row1=[], row2=[];
   channels.forEach((ch,i) => { const btn = cbButton(`${(page-1)*10+i+1}`, `creator_channel_detail_${ch.channel_id}`); if(i<5)row1.push(btn);else row2.push(btn); });
@@ -42,6 +46,19 @@ async function showCreatorChannelDetail(chatId, userId, channelId, msgId) {
   const name = ch.username ? `@${ch.username}` : ch.channel_name;
   const status = ch.is_suspended ? '🚫 Suspended' : ch.is_paused ? '⏸ Paused' : '✅ Active';
   const joinLink = `https://t.me/${process.env.BOT_USERNAME}?start=join_${channelId}`;
+
+  // ---- Platform Membership (fee) status — this is YOUR own membership on Crevio ----
+  const now = Date.now();
+  let feeLine;
+  if (!ch.platform_fee_expires_at) {
+    feeLine = `🔴 <b>Platform Membership:</b> Not Paid`;
+  } else if (ch.platform_fee_expires_at <= now) {
+    feeLine = `🔴 <b>Platform Membership:</b> Expired (${formatDate(ch.platform_fee_expires_at)})`;
+  } else {
+    const daysLeft = Math.ceil((ch.platform_fee_expires_at - now) / (24*60*60*1000));
+    feeLine = `🟢 <b>Platform Membership:</b> Active — ${daysLeft} day${daysLeft===1?'':'s'} left\n📅 <b>Renews/Expires:</b> ${formatDate(ch.platform_fee_expires_at)}`;
+  }
+
   return editMessage(chatId, msgId,
     `📢 <b>Channel:</b> <i>${name}</i>\n` +
     `👥 <b>Total Members:</b> ${ch.total_members}\n` +
@@ -50,9 +67,12 @@ async function showCreatorChannelDetail(chatId, userId, channelId, msgId) {
     `🎟 <b>Active Plans:</b> ${activePlans?.c||0}\n` +
     `⏳ <b>Expiring Soon:</b> ${expiring?.c||0} members\n` +
     `🌐 <b>Status:</b> ${status}\n\n` +
+    `${feeLine}\n\n` +
     `🔗 <b>Your Payment Link:</b>\n<code>${joinLink}</code>\n` +
     `<i>Share this link with your audience to get subscribers!</i>`,
     { reply_markup: inlineKeyboard([
+      [cbButton('💳 Renew Platform Membership', `renew_fee_${channelId}`)],
+      [cbButton('💎 Manage Plans', `creator_plans`), cbButton('➕ Add Plan', `add_plan_channel_${channelId}`)],
       [cbButton('✏️ Edit', `edit_channel_${channelId}`), cbButton('🗑 Delete', `delete_channel_${channelId}`)],
       [cbButton('📤 Share Link', `share_channel_link_${channelId}`)],
       [cbButton('🔙 Back to List', 'creator_channels')],
