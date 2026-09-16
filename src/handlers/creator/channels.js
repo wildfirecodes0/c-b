@@ -124,6 +124,8 @@ async function deleteChannel(chatId, userId, channelId, msgId) {
   await d1Run("UPDATE payment_sessions SET status='expired', updated_at=? WHERE channel_id=?", [Date.now(), channelId]);
   // Deactivate plans
   await d1Run('UPDATE plans SET is_active=0, updated_at=? WHERE channel_id=?', [Date.now(), channelId]);
+  // Disassociate transactions from channel (keep for history) 
+  await d1Run('UPDATE transactions SET channel_id=NULL WHERE channel_id=?', [channelId]);
   // Now safe to delete channel
   await d1Run('DELETE FROM channels WHERE channel_id=?', [channelId]);
   return editMessage(chatId, msgId, `✅ <b>Channel Deleted!</b>`, { reply_markup: inlineKeyboard([[cbButton('🔙 Back to List', 'creator_channels')]]) });

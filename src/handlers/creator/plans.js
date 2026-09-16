@@ -40,8 +40,9 @@ async function showCreatorMembers(chatId, userId, page, msgId) {
   const subs = await d1All(`SELECT s.*, u.full_name, u.username as user_username, c.channel_name, p.plan_type, p.price FROM subscriptions s JOIN users u ON s.user_id=u.user_id JOIN channels c ON s.channel_id=c.channel_id JOIN plans p ON s.plan_id=p.id WHERE s.creator_user_id=? ORDER BY s.created_at DESC LIMIT ? OFFSET ?`, [userId,limit,offset]);
   const total = await d1First('SELECT COUNT(*) as c FROM subscriptions WHERE creator_user_id=?',[userId]);
   if (!subs.length) return editMessage(chatId,msgId,`<b>👥 Your Members</b>\n━━━━━━━━━━━━━━━━━━\n\nNo members yet.`,{reply_markup:inlineKeyboard([[cbButton('🔙 Back','creator_menu')]])});
+  const _now = Date.now();
   let text=`<b>👥 Your Members</b>\n━━━━━━━━━━━━━━━━━━\n`;
-  subs.forEach((s,i)=>{ const num=(page-1)*10+i+1; const status=s.status==='active'?'✅ Active':s.status==='expired'?'❌ Expired':'⏳ Expiring'; text+=`\n<b>${num}.</b> <i>${s.full_name}</i> — ${s.channel_name} -> <b>${status}</b>`; });
+  subs.forEach((s,i)=>{ const num=(page-1)*10+i+1; let status; if(s.status==='expired'||s.status==='cancelled'){status='❌ Expired';}else if(s.expires_at<=_now){status='❌ Expired';}else if(s.expires_at<=_now+3*24*60*60*1000){status='⏳ Expiring Soon';}else{status='✅ Active';} text+=`\n<b>${num}.</b> <i>${s.full_name}</i> — ${s.channel_name} -> <b>${status}</b>`; });
   const buttons=[]; const row1=[],row2=[];
   subs.forEach((s,i)=>{ const btn=cbButton(`${(page-1)*10+i+1}`,`member_detail_${s.id}`); if(i<5)row1.push(btn);else row2.push(btn); });
   if(row1.length)buttons.push(row1); if(row2.length)buttons.push(row2);
@@ -90,7 +91,7 @@ async function removeMember(chatId, userId, subId, msgId) {
 // ---- PAYMENTS ----
 async function showCreatorPayments(chatId, userId, page, msgId) {
   const limit=5, offset=(page-1)*limit;
-  const txns = await d1All(`SELECT t.*,u.full_name,c.channel_name,p.plan_type FROM transactions t JOIN users u ON t.user_id=u.user_id JOIN channels c ON t.channel_id=c.channel_id JOIN plans p ON t.plan_id=p.id WHERE t.creator_user_id=? ORDER BY t.created_at DESC LIMIT ? OFFSET ?`,[userId,limit,offset]);
+  const txns = await d1All(`SELECT t.*,u.full_name,c.channel_name,COALESCE(p.plan_type,'platform_fee') as plan_type FROM transactions t JOIN users u ON t.user_id=u.user_id LEFT JOIN channels c ON t.channel_id=c.channel_id LEFT JOIN plans p ON t.plan_id=p.id WHERE t.creator_user_id=? ORDER BY t.created_at DESC LIMIT ? OFFSET ?`,[userId,limit,offset]);
   const total = await d1First('SELECT COUNT(*) as c FROM transactions WHERE creator_user_id=?',[userId]);
   if (!txns.length) return editMessage(chatId,msgId,`<b>💰 Payment History</b>\n━━━━━━━━━━━━━━━━━━\n\nNo payments yet.`,{reply_markup:inlineKeyboard([[cbButton('🔙 Back','creator_menu')]])});
   let text=`<b>💰 Payment History</b>\n━━━━━━━━━━━━━━━━━━\n`;
@@ -106,7 +107,7 @@ async function showCreatorPayments(chatId, userId, page, msgId) {
 }
 
 async function showCreatorPaymentDetail(chatId, userId, txnId, msgId) {
-  const t = await d1First(`SELECT t.*,u.full_name,c.channel_name,p.plan_type FROM transactions t JOIN users u ON t.user_id=u.user_id JOIN channels c ON t.channel_id=c.channel_id JOIN plans p ON t.plan_id=p.id WHERE t.txn_id=? AND t.creator_user_id=?`,[txnId,userId]);
+  const t = await d1First(`SELECT t.*,u.full_name,COALESCE(c.channel_name,'Platform Fee') as channel_name,COALESCE(p.plan_type,'platform_fee') as plan_type FROM transactions t JOIN users u ON t.user_id=u.user_id LEFT JOIN channels c ON t.channel_id=c.channel_id LEFT JOIN plans p ON t.plan_id=p.id WHERE t.txn_id=? AND t.creator_user_id=?`,[txnId,userId]);
   if (!t) return;
   const status=t.status==='success'?'✅ Success':t.status==='failed'?'❌ Failed':'🔄 Refunded';
   return editMessage(chatId,msgId,
@@ -116,7 +117,7 @@ async function showCreatorPaymentDetail(chatId, userId, txnId, msgId) {
 }
 
 async function downloadCreatorPaymentsPDF(chatId, userId) {
-  const txns = await d1All(`SELECT t.*,u.full_name,c.channel_name,p.plan_type FROM transactions t JOIN users u ON t.user_id=u.user_id JOIN channels c ON t.channel_id=c.channel_id JOIN plans p ON t.plan_id=p.id WHERE t.creator_user_id=? ORDER BY t.created_at DESC`,[userId]);
+  const txns = await d1All(`SELECT t.*,u.full_name,COALESCE(c.channel_name,'Platform Fee') as channel_name,COALESCE(p.plan_type,'platform_fee') as plan_type FROM transactions t JOIN users u ON t.user_id=u.user_id LEFT JOIN channels c ON t.channel_id=c.channel_id LEFT JOIN plans p ON t.plan_id=p.id WHERE t.creator_user_id=? ORDER BY t.created_at DESC`,[userId]);
   const user = await d1First('SELECT full_name FROM users WHERE user_id=?',[userId]);
   const total=txns.reduce((s,t)=>t.status==='success'?s+t.amount:s,0);
   const rows=txns.map((t,i)=>`<tr><td>${i+1}</td><td>${t.full_name}</td><td>${t.channel_name}</td><td>₹${t.amount/100}</td><td>${t.method}</td><td>${t.status}</td><td>${new Date(t.created_at).toLocaleDateString('en-IN')}</td></tr>`).join('');

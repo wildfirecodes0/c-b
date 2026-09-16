@@ -145,19 +145,17 @@ async function showPlatformFeePayment(chatId, userId, msgId) {
   const unclaimed = user?.unclaimed_free_days || 0;
 
   let text = `<b>💰 Step 4/4 — Platform Fee</b>\n━━━━━━━━━━━━━━━━━━\n💰 <b>One Time Fee:</b> ₹${fee} per channel\n\n`;
+  const buttons = [];
   if (unclaimed > 0) {
-    text += `<i>🎁 You have</i> <b>${unclaimed} free day${unclaimed === 1 ? '' : 's'}</b> <i>banked from referrals!</i>\n` +
-            `<i>Once this channel is live, claim them from its "Renew Platform Fee" screen to extend your membership for free.</i>\n\n`;
+    text += `🎁 <b>You have ${unclaimed} free day${unclaimed === 1 ? '' : 's'} from referrals!</b>\n` +
+            `<i>You can cover ${unclaimed} day${unclaimed === 1 ? '' : 's'} of your membership free — but platform fee (₹${fee}) must be paid first to activate the channel. Claim free days after activation from "Renew Platform Fee" screen.</i>\n\n`;
   }
   text += `Pay via:`;
+  buttons.push([cbButton('💳 Pay via Razorpay', 'fee_pay_razorpay')]);
+  buttons.push([cbButton('🪙 Pay via TRX', 'fee_pay_trx')]);
+  buttons.push([cbButton('🔙 Back', 'creator_setup_plan')]);
 
-  return editMessage(chatId, msgId, text,
-    { reply_markup: inlineKeyboard([
-      [cbButton('💳 Pay via Razorpay', 'fee_pay_razorpay')],
-      [cbButton('🪙 Pay via TRX', 'fee_pay_trx')],
-      [cbButton('🔙 Back', 'creator_setup_plan')],
-    ]) }
-  );
+  return editMessage(chatId, msgId, text, { reply_markup: inlineKeyboard(buttons) });
 }
 
 // Creates the (dormant) channel + plan rows, then generates a platform-fee

@@ -73,7 +73,11 @@ async function checkExpiringSubscriptions() {
   const expired = await d1All(
     `SELECT s.id, s.user_id, s.channel_id, s.expires_at, s.is_trial, s.creator_user_id, c.channel_name, u.full_name
      FROM subscriptions s JOIN channels c ON s.channel_id = c.channel_id JOIN users u ON s.user_id = u.user_id
-     WHERE s.status = 'active' AND s.grace_until <= ?`, [now]
+     WHERE s.status = 'active' AND (
+       s.grace_until <= ? OR 
+       (s.grace_until IS NULL AND s.expires_at <= ?) OR
+       (s.grace_until = 0 AND s.expires_at <= ?)
+     )`, [now, now, now]
   );
   for (const sub of expired) {
     try { await kickChatMember(sub.channel_id, sub.user_id); } catch (e) {}

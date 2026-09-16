@@ -131,7 +131,7 @@ async function showAdminChannelDetail(chatId, userId, channelId, msgId) {
 
 async function showAdminTransactions(chatId, userId, page, msgId) {
   const limit=10, offset=(page-1)*limit;
-  const txns = await d1All('SELECT t.*, u.full_name FROM transactions t JOIN users u ON t.user_id=u.user_id ORDER BY t.created_at DESC LIMIT ? OFFSET ?',[limit,offset]);
+  const txns = await d1All('SELECT t.*, u.full_name, COALESCE(c.channel_name,\'Platform Fee\') as channel_name FROM transactions t JOIN users u ON t.user_id=u.user_id LEFT JOIN channels c ON t.channel_id=c.channel_id ORDER BY t.created_at DESC LIMIT ? OFFSET ?',[limit,offset]);
   const total = await d1First('SELECT COUNT(*) as c FROM transactions');
   let text=`<b>💳 All Transactions</b>\n━━━━━━━━━━━━━━━━━━\n`;
   txns.forEach((t,i)=>{ const num=(page-1)*10+i+1; const status=t.status==='success'?'✅ Success':t.status==='failed'?'❌ Failed':'🔄 Refunded'; text+=`\n<b>${num}.</b> <i>${t.full_name}</i> — ₹${t.amount/100} -> <b>${status}</b>`; });
@@ -148,7 +148,7 @@ async function showAdminTransactions(chatId, userId, page, msgId) {
 }
 
 async function showAdminTxnDetail(chatId, userId, txnId, msgId) {
-  const t = await d1First('SELECT t.*, u.full_name, c.channel_name, cu.full_name as creator_name, p.plan_type FROM transactions t JOIN users u ON t.user_id=u.user_id JOIN channels c ON t.channel_id=c.channel_id JOIN users cu ON t.creator_user_id=cu.user_id JOIN plans p ON t.plan_id=p.id WHERE t.txn_id=?',[txnId]);
+  const t = await d1First('SELECT t.*, u.full_name, COALESCE(c.channel_name,\'Platform Fee\') as channel_name, cu.full_name as creator_name, COALESCE(p.plan_type,\'platform_fee\') as plan_type FROM transactions t JOIN users u ON t.user_id=u.user_id LEFT JOIN channels c ON t.channel_id=c.channel_id JOIN users cu ON t.creator_user_id=cu.user_id LEFT JOIN plans p ON t.plan_id=p.id WHERE t.txn_id=?',[txnId]);
   if (!t) return;
   const status=t.status==='success'?'✅ Success':t.status==='failed'?'❌ Failed':'🔄 Refunded';
   return editMessage(chatId,msgId,
@@ -164,10 +164,10 @@ async function showAdminRevenue(chatId, userId, msgId) {
     d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE status='success' AND created_at>=?",[now-7*86400000]),
     d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE status='success' AND created_at>=?",[now-30*86400000]),
     d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE status='success'"),
-    d1First("SELECT COALESCE(SUM(platform_fee),0) as t FROM transactions WHERE status='success'"),
-    d1First("SELECT COALESCE(SUM(commission),0) as t FROM transactions WHERE status='success'"),
+    d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE status='success' AND plan_id=0"),
+    d1First("SELECT COALESCE(SUM(commission),0) as t FROM transactions WHERE status='success' AND plan_id != 0"),
   ]);
-  const topCreators = await d1All("SELECT u.full_name, COALESCE(SUM(t.amount),0) as rev FROM transactions t JOIN users u ON t.creator_user_id=u.user_id WHERE t.status='success' GROUP BY t.creator_user_id ORDER BY rev DESC LIMIT 3");
+  const topCreators = await d1All("SELECT u.full_name, COALESCE(SUM(t.amount),0) as rev FROM transactions t JOIN users u ON t.creator_user_id=u.user_id WHERE t.status='success' AND t.plan_id != 0 GROUP BY t.creator_user_id ORDER BY rev DESC LIMIT 3");
   const medals=['🥇','🥈','🥉'];
   let creatorsText=topCreators.length?'':'\nNo data yet';
   topCreators.forEach((c,i)=>{ creatorsText+=`\n${medals[i]} <i>${c.full_name}</i> — ₹${c.rev/100}`; });
@@ -212,7 +212,7 @@ async function toggleMaintenance(chatId, userId, msgId) {
 }
 
 async function downloadAdminTransactionsPDF(chatId, userId) {
-  const txns = await d1All(`SELECT t.*, u.full_name, c.channel_name, cu.full_name as creator_name, p.plan_type FROM transactions t JOIN users u ON t.user_id=u.user_id JOIN channels c ON t.channel_id=c.channel_id JOIN users cu ON t.creator_user_id=cu.user_id JOIN plans p ON t.plan_id=p.id ORDER BY t.created_at DESC`);
+  const txns = await d1All(`SELECT t.*, u.full_name, COALESCE(c.channel_name,'Platform Fee') as channel_name, cu.full_name as creator_name, COALESCE(p.plan_type,'platform_fee') as plan_type FROM transactions t JOIN users u ON t.user_id=u.user_id LEFT JOIN channels c ON t.channel_id=c.channel_id JOIN users cu ON t.creator_user_id=cu.user_id LEFT JOIN plans p ON t.plan_id=p.id ORDER BY t.created_at DESC`);
   const total = txns.reduce((s,t)=>t.status==='success'?s+t.amount:s,0);
   const commission = txns.reduce((s,t)=>t.status==='success'?s+(t.commission||0):s,0);
   const rows = txns.map((t,i)=>`<tr><td>${i+1}</td><td>${t.full_name}</td><td>${t.creator_name}</td><td>${t.channel_name}</td><td>₹${t.amount/100}</td><td>${t.method}</td><td>${t.status}</td><td>${new Date(t.created_at).toLocaleDateString('en-IN')}</td></tr>`).join('');

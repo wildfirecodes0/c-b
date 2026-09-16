@@ -210,16 +210,18 @@ async function processSuccessfulPayment(session, paymentData, method) {
       );
     }
 
-    if (user.referred_by) {
-      const rewarded = await handleReferralReward(user.referred_by, user.user_id);
+    // Referral reward - fetch fresh from DB to bypass cache
+    const freshUser = await d1First('SELECT referred_by FROM users WHERE user_id = ?', [session.user_id]);
+    if (freshUser?.referred_by) {
+      const rewarded = await handleReferralReward(freshUser.referred_by, session.user_id);
       if (rewarded) {
-        const { getUser } = require('../../db/index');
-        const referrer = await getUser(user.referred_by);
-        const unclaimed = referrer?.unclaimed_free_days || 0;
-        await sendMessage(user.referred_by,
-          `🎁 <b>Referral Reward!</b>\n\nYour friend subscribed! You've banked <b>1 more free day</b> 🎉\n\n` +
+        // Fetch referrer fresh after reward update
+        const referrer = await d1First('SELECT full_name, unclaimed_free_days FROM users WHERE user_id = ?', [freshUser.referred_by]);
+        const unclaimed = referrer?.unclaimed_free_days || 1;
+        await sendMessage(freshUser.referred_by,
+          `🎁 <b>Referral Reward!</b>\n\nYour friend <b>${user.full_name}</b> just subscribed! You've banked <b>1 more free day</b> 🎉\n\n` +
           `💰 <b>Unclaimed Balance:</b> ${unclaimed} free day${unclaimed === 1 ? '' : 's'}\n\n` +
-          `💡 <i>If you're a creator, claim this anytime from your channel's "Renew Platform Fee" screen — it'll extend your membership by ${unclaimed} day${unclaimed === 1 ? '' : 's'} in one go, no payment needed!</i>`
+          `💡 <i>If you're a creator, claim this anytime from your channel's "Renew Platform Fee" screen to extend your membership for free!</i>`
         );
       }
     }
@@ -285,6 +287,26 @@ async function completePlatformFeePayment(session, method) {
 
     await d1Run('UPDATE creators SET onboarding_complete=1, updated_at=? WHERE user_id=?', [now, session.creator_user_id]);
     await updateUser(session.creator_user_id, { role: 'creator' });
+
+    // Record platform fee as a transaction (plan_id=0 marks it as platform fee)
+    try {
+      const feeTxnId = `FEE${now}${session.creator_user_id}`;
+      await createTransaction({
+        txnId: feeTxnId,
+        userId: session.creator_user_id,
+        channelId: session.channel_id,
+        planId: 0,
+        creatorUserId: session.creator_user_id,
+        amount: session.amount,
+        method,
+        status: 'success',
+        razorpayPaymentId: null,
+        trxHash: null,
+        trxAmountUsdt: null,
+        platformFee: session.amount,
+        commission: 0,
+      });
+    } catch (e) { console.error('Fee transaction record error:', e.message); }
 
     const [user, channel, plan] = await Promise.all([
       getUser(session.creator_user_id),

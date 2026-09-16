@@ -103,8 +103,8 @@ async function showTransactions(chatId, userId, msgId) {
 
 async function showTransactionDetail(chatId, userId, txnId, msgId) {
   const t = await d1First(
-    `SELECT t.*, c.channel_name, p.plan_type FROM transactions t
-     JOIN channels c ON t.channel_id = c.channel_id JOIN plans p ON t.plan_id = p.id
+    `SELECT t.*, COALESCE(c.channel_name,'Platform Fee') as channel_name, COALESCE(p.plan_type,'platform_fee') as plan_type FROM transactions t
+     LEFT JOIN channels c ON t.channel_id = c.channel_id LEFT JOIN plans p ON t.plan_id = p.id
      WHERE t.txn_id = ? AND t.user_id = ?`, [txnId, userId]
   );
   if (!t) return;
@@ -117,8 +117,8 @@ async function showTransactionDetail(chatId, userId, txnId, msgId) {
 
 async function downloadTransactionPDF(chatId, userId) {
   const txns = await d1All(
-    `SELECT t.*, c.channel_name, p.plan_type FROM transactions t
-     JOIN channels c ON t.channel_id = c.channel_id JOIN plans p ON t.plan_id = p.id
+    `SELECT t.*, COALESCE(c.channel_name,'Platform Fee') as channel_name, COALESCE(p.plan_type,'platform_fee') as plan_type FROM transactions t
+     LEFT JOIN channels c ON t.channel_id = c.channel_id LEFT JOIN plans p ON t.plan_id = p.id
      WHERE t.user_id = ? ORDER BY t.created_at DESC LIMIT 100`, [userId]
   );
   const user = await getUser(userId);

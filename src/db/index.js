@@ -269,9 +269,8 @@ async function createTransaction(data) {
 
 async function getUserTransactions(userId, limit = 5) {
   return d1All(
-    `SELECT t.*, c.channel_name, p.plan_type FROM transactions t
-     JOIN channels c ON t.channel_id = c.channel_id
-     JOIN plans p ON t.plan_id = p.id
+    `SELECT t.*, COALESCE(c.channel_name,'Platform Fee') as channel_name, COALESCE(p.plan_type,'platform_fee') as plan_type FROM transactions t
+     LEFT JOIN channels c ON t.channel_id = c.channel_id LEFT JOIN plans p ON t.plan_id = p.id
      WHERE t.user_id = ? ORDER BY t.created_at DESC LIMIT ?`,
     [userId, limit]
   );
