@@ -57,7 +57,12 @@ async function showCreatorMembers(chatId, userId, page, msgId) {
 async function showMemberDetail(chatId, userId, subId, msgId) {
   const sub = await d1First(`SELECT s.*,u.full_name,u.username as user_username,c.channel_name,p.plan_type,p.price FROM subscriptions s JOIN users u ON s.user_id=u.user_id JOIN channels c ON s.channel_id=c.channel_id JOIN plans p ON s.plan_id=p.id WHERE s.id=? AND s.creator_user_id=?`,[subId,userId]);
   if (!sub) return;
-  const status=sub.status==='active'?'✅ Active':sub.status==='expired'?'❌ Expired':'⏳ Expiring';
+  const _now2 = Date.now();
+  let status;
+  if(sub.status==='expired'||sub.status==='cancelled'){status='❌ Expired';}
+  else if(sub.expires_at<=_now2){status='❌ Expired';}
+  else if(sub.expires_at<=_now2+3*24*60*60*1000){status='⏳ Expiring Soon';}
+  else{status='✅ Active';}
   return editMessage(chatId,msgId,
     `<b>👤 Member Details</b>\n━━━━━━━━━━━━━━━━━━\n👤 <b>Name:</b> ${sub.full_name}\n🆔 <b>User ID:</b> <code>${sub.user_id}</code>\n🔗 <b>Username:</b> ${sub.user_username?'@'+sub.user_username:'N/A'}\n📢 <b>Channel:</b> ${sub.channel_name}\n💴 <b>Plan:</b> ${sub.plan_type} — ₹${sub.price/100}\n📅 <b>Activation:</b> ${formatDate(sub.activated_at)}\n💥 <b>Expires:</b> ${formatDate(sub.expires_at)}\n🌐 <b>Status:</b> ${status}`,
     {reply_markup:inlineKeyboard([[cbButton('➕ Extend',`extend_member_${sub.id}`),cbButton('❌ Remove',`remove_member_${sub.id}`)],[cbButton('🔙 Back to List','creator_members')]])}

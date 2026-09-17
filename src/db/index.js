@@ -424,7 +424,7 @@ async function handleReferralReward(referrerUserId, referredUserId) {
   // free_days_earned = lifetime total (never decreases, just a stat).
   // unclaimed_free_days = the actual claimable balance (goes to 0 once claimed).
   await d1Run(
-    'UPDATE users SET free_days_earned = free_days_earned + 1, unclaimed_free_days = unclaimed_free_days + 1, updated_at = ? WHERE user_id = ?',
+    'UPDATE users SET free_days_earned = COALESCE(free_days_earned, 0) + 1, unclaimed_free_days = COALESCE(unclaimed_free_days, 0) + 1, updated_at = ? WHERE user_id = ?',
     [Date.now(), referrerUserId]
   );
   cache.del(`user:${referrerUserId}`);

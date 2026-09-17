@@ -161,4 +161,13 @@ async function sendWeeklyStats() {
   } catch (err) { console.error('Weekly stats error:', err.message); }
 }
 
-module.exports = { startCronJobs };
+// Run all cron tasks once — called by external HTTP trigger (/cron endpoint)
+async function runCronOnce() {
+  await Promise.all([
+    checkExpiringSubscriptions(),
+    expirePaymentSessions(),
+    checkCreatorFeeExpiry(),
+  ]);
+}
+
+module.exports = { startCronJobs, runCronOnce };

@@ -14,6 +14,19 @@ app.use(express.json());
 
 app.get('/health', (req, res) => res.json({ status: 'ok', version: '1.0.0', timestamp: Date.now() }));
 
+// External cron trigger — call this from cron-job.org every minute to keep bot alive
+// and ensure expiry/payment processing even if Render spins down
+app.get('/cron', async (req, res) => {
+  const secret = req.headers['x-cron-secret'] || req.query.secret;
+  if (process.env.CRON_SECRET && secret !== process.env.CRON_SECRET) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  res.json({ status: 'ok', timestamp: Date.now() });
+  // Run all cron tasks in background
+  const { runCronOnce } = require('./handlers/cron');
+  runCronOnce().catch(err => console.error('External cron error:', err.message));
+});
+
 // Public REST API — authenticated per-request via the user's 40-char API key.
 // Used by the upcoming Crevio web app; mirrors the bot's own data exactly.
 app.use('/api/v1', apiRouter);
