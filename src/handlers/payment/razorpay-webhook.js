@@ -308,6 +308,23 @@ async function completePlatformFeePayment(session, method) {
       });
     } catch (e) { console.error('Fee transaction record error:', e.message); }
 
+    // Referral reward — platform fee payment counts as conversion
+    try {
+      const freshCreator = await d1First('SELECT referred_by FROM users WHERE user_id = ?', [session.creator_user_id]);
+      if (freshCreator?.referred_by) {
+        const rewarded = await handleReferralReward(freshCreator.referred_by, session.creator_user_id);
+        if (rewarded) {
+          const referrer = await d1First('SELECT unclaimed_free_days FROM users WHERE user_id = ?', [freshCreator.referred_by]);
+          const unclaimed = referrer?.unclaimed_free_days || 1;
+          await sendMessage(freshCreator.referred_by,
+            `🎁 <b>Referral Reward!</b>\n\nYour friend just paid the platform fee! You've banked <b>1 more free day</b> 🎉\n\n` +
+            `💰 <b>Unclaimed Balance:</b> ${unclaimed} free day${unclaimed === 1 ? '' : 's'}\n\n` +
+            `💡 <i>Go to your channel's "Renew Platform Fee" screen → "Claim FREE Access" to use them!</i>`
+          );
+        }
+      }
+    } catch (e) { console.error('Fee referral reward error:', e.message); }
+
     const [user, channel, plan] = await Promise.all([
       getUser(session.creator_user_id),
       getChannel(session.channel_id),
