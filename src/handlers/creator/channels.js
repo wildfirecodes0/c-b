@@ -111,27 +111,52 @@ async function confirmDeleteChannel(chatId, userId, channelId, msgId) {
 }
 
 async function deleteChannel(chatId, userId, channelId, msgId) {
-  const ch = await d1First('SELECT id, channel_name FROM channels WHERE channel_id = ? AND creator_user_id = ?', [channelId, userId]);
-  if (!ch) return;
-  const activeSubs = await d1All("SELECT user_id FROM subscriptions WHERE channel_id = ? AND status = 'active'", [channelId]);
-  for (const sub of activeSubs) {
-    try { await kickChatMember(channelId, sub.user_id); } catch (e) {}
-    try { await sendMessage(sub.user_id, `❌ <b>Channel Removed</b>\n\n<i>${ch.channel_name}</i> has been removed by its creator. Your access has ended.`); } catch (e) {}
+  try {
+    const ch = await d1First('SELECT id, channel_name FROM channels WHERE channel_id = ? AND creator_user_id = ?', [channelId, userId]);
+    if (!ch) {
+      return editMessage(chatId, msgId, `❌ <b>Channel not found or access denied.</b>`,
+        { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'creator_channels')]]) });
+    }
+
+    // Notify & kick all active subscribers
+    const activeSubs = await d1All("SELECT user_id FROM subscriptions WHERE channel_id = ? AND status = 'active'", [channelId]);
+    for (const sub of activeSubs) {
+      try { await kickChatMember(channelId, sub.user_id); } catch (e) {}
+      try { await sendMessage(sub.user_id, `❌ <b>Channel Removed</b>\n\n<i>${ch.channel_name}</i> has been removed by its creator. Your access has ended.`); } catch (e) {}
+    }
+
+    // Cancel all subscriptions
+    try { await d1Run("UPDATE subscriptions SET status='cancelled', cancelled_at=?, updated_at=? WHERE channel_id=?", [Date.now(), Date.now(), channelId]); } catch(e) { console.error('sub cancel err:', e.message); }
+    // Expire pending payment sessions
+    try { await d1Run("UPDATE payment_sessions SET status='expired', updated_at=? WHERE channel_id=?", [Date.now(), channelId]); } catch(e) { console.error('session expire err:', e.message); }
+    // Deactivate plans
+    try { await d1Run('UPDATE plans SET is_active=0, updated_at=? WHERE channel_id=?', [Date.now(), channelId]); } catch(e) { console.error('plan deactivate err:', e.message); }
+    // Delete from ALL FK-referencing tables before deleting channel
+    try { await d1Run('DELETE FROM channel_analytics WHERE channel_id=?', [channelId]); } catch(e) {}
+    try { await d1Run('DELETE FROM waitlist WHERE channel_id=?', [channelId]); } catch(e) {}
+    try { await d1Run('DELETE FROM trials WHERE channel_id=?', [channelId]); } catch(e) {}
+    try { await d1Run('DELETE FROM subscriptions WHERE channel_id=?', [channelId]); } catch(e) {}
+    try { await d1Run('DELETE FROM plans WHERE channel_id=?', [channelId]); } catch(e) {}
+    // transactions.channel_id is NOT NULL — store deleted channel_id as negative of itself to preserve history
+    try { await d1Run('UPDATE transactions SET channel_id = 0 - channel_id WHERE channel_id=?', [channelId]); } catch(e) {}
+    // Now safe to delete channel
+    await d1Run('DELETE FROM channels WHERE channel_id=?', [channelId]);
+
+    // Verify
+    const stillExists = await d1First('SELECT channel_id FROM channels WHERE channel_id=?', [channelId]);
+    if (stillExists) {
+      return editMessage(chatId, msgId,
+        `❌ <b>Delete failed!</b>\n\nChannel still exists in DB. Please contact support.`,
+        { reply_markup: inlineKeyboard([[cbButton('🔙 Back', `creator_channel_detail_${channelId}`)]]) });
+    }
+
+    return editMessage(chatId, msgId, `✅ <b>Channel Deleted!</b>\n\n<i>${ch.channel_name}</i> has been removed successfully.`,
+      { reply_markup: inlineKeyboard([[cbButton('🔙 My Channels', 'creator_channels')]]) });
+
+  } catch (err) {
+    console.error('deleteChannel error:', err.message);
+    return editMessage(chatId, msgId,
+      `❌ <b>Error:</b> ${err.message}\n\nPlease try again.`,
+      { reply_markup: inlineKeyboard([[cbButton('🔙 Back', `creator_channel_detail_${channelId}`)]]) });
   }
-  // Cancel all subscriptions
-  await d1Run("UPDATE subscriptions SET status='cancelled', cancelled_at=?, updated_at=? WHERE channel_id=?", [Date.now(), Date.now(), channelId]);
-  // Expire all pending payment sessions for this channel
-  await d1Run("UPDATE payment_sessions SET status='expired', updated_at=? WHERE channel_id=?", [Date.now(), channelId]);
-  // Deactivate plans
-  await d1Run('UPDATE plans SET is_active=0, updated_at=? WHERE channel_id=?', [Date.now(), channelId]);
-  // Delete channel directly - D1 does not enforce FK constraints by default
-  // Transactions keep channel_id for history (channel row will be gone but txn data preserved)
-  await d1Run('DELETE FROM channels WHERE channel_id=?', [channelId]);
-  
-  // Verify deletion succeeded
-  const stillExists = await d1First('SELECT channel_id FROM channels WHERE channel_id=?', [channelId]);
-  if (stillExists) {
-    return editMessage(chatId, msgId, `❌ <b>Delete failed!</b> Please try again.`, { reply_markup: inlineKeyboard([[cbButton('🔙 Back', `creator_channel_detail_${channelId}`)]]) });
-  }
-  return editMessage(chatId, msgId, `✅ <b>Channel Deleted!</b>`, { reply_markup: inlineKeyboard([[cbButton('🔙 Back to List', 'creator_channels')]]) });
 }
