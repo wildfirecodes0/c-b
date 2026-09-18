@@ -137,8 +137,8 @@ async function deleteChannel(chatId, userId, channelId, msgId) {
     try { await d1Run('DELETE FROM trials WHERE channel_id=?', [channelId]); } catch(e) {}
     try { await d1Run('DELETE FROM subscriptions WHERE channel_id=?', [channelId]); } catch(e) {}
     try { await d1Run('DELETE FROM plans WHERE channel_id=?', [channelId]); } catch(e) {}
-    // transactions.channel_id is NOT NULL — store deleted channel_id as negative of itself to preserve history
-    try { await d1Run('UPDATE transactions SET channel_id = 0 - channel_id WHERE channel_id=?', [channelId]); } catch(e) {}
+    // Delete transactions for this channel (history preserved in creator_user_id records)
+    try { await d1Run('DELETE FROM transactions WHERE channel_id=?', [channelId]); } catch(e) { console.error('txn delete err:', e.message); }
     // Now safe to delete channel
     await d1Run('DELETE FROM channels WHERE channel_id=?', [channelId]);
 
