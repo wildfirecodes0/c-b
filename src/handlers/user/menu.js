@@ -10,7 +10,7 @@ async function showUserMenu(chatId, userId, msgId = null) {
   const text = `✨ <b>Crevio Bot</b> — Choose an option 👇`;
   const kb = inlineKeyboard([
     [cbButton('💎 My Memberships', 'user_memberships'), cbButton('🧾 Transactions', 'user_transactions')],
-    [cbButton('🎁 Refer & Earn', 'user_refer'), cbButton('👤 Profile', 'user_profile')],
+    [cbButton('🔍 Discover Channels', 'discover_channels'), cbButton('👤 Profile', 'user_profile')],
     creator?.onboarding_complete
       ? [cbButton('📊 Creator Dashboard', 'creator_dashboard')]
       : [cbButton('🚀 Become a Creator', 'user_become_creator')],
@@ -25,7 +25,7 @@ async function showProfile(chatId, userId, msgId) {
   const user = await getUser(userId);
   const activeSubs = await d1First("SELECT COUNT(*) as c FROM subscriptions WHERE user_id = ? AND status = 'active'", [userId]);
   return editMessage(chatId, msgId,
-    `<b>👤 My Profile</b>\n━━━━━━━━━━━━━━━━━━\n🆔 <b>ID:</b> <code>${user.user_id}</code>\n👤 <b>Name:</b> ${user.full_name}\n📅 <b>Joined:</b> ${formatDate(user.created_at)}\n💎 <b>Active Plans:</b> ${activeSubs?.c || 0}\n🎁 <b>Referrals:</b> ${user.free_days_earned || 0} free days earned`,
+    `<b>👤 My Profile</b>\n━━━━━━━━━━━━━━━━━━\n🆔 <b>ID:</b> <code>${user.user_id}</code>\n👤 <b>Name:</b> ${user.full_name}\n📅 <b>Joined:</b> ${formatDate(user.created_at)}\n💎 <b>Active Plans:</b> ${activeSubs?.c || 0}`,
     { reply_markup: inlineKeyboard([[cbButton('🔑 API Key', 'api_key_view_user')], [cbButton('🔙 Back', 'main_menu')]]) }
   );
 }
@@ -154,4 +154,93 @@ async function showFAQ(chatId, userId, msgId) {
   );
 }
 
-module.exports = { showUserMenu, showProfile, showMemberships, showMembershipDetail, showTransactions, showTransactionDetail, downloadTransactionPDF, showReferEarn, showSupport, showFAQ };
+async function showDiscoverChannels(chatId, userId, page = 1, msgId) {
+  const limit = 10;
+  const offset = (page - 1) * limit;
+  const now = Date.now();
+
+  const channels = await require('../../db/d1').d1All(
+    `SELECT c.channel_id, c.channel_name, c.username, c.type,
+            COUNT(s.id) as member_count,
+            p.plan_type, p.price
+     FROM channels c
+     LEFT JOIN subscriptions s ON s.channel_id = c.channel_id AND s.status = 'active'
+     LEFT JOIN plans p ON p.channel_id = c.channel_id AND p.is_active = 1
+     WHERE c.is_active = 1 AND c.platform_fee_expires_at > ?
+     GROUP BY c.channel_id
+     ORDER BY member_count DESC
+     LIMIT ? OFFSET ?`,
+    [now, limit, offset]
+  );
+
+  const total = await require('../../db/d1').d1First(
+    'SELECT COUNT(*) as c FROM channels WHERE is_active=1 AND platform_fee_expires_at > ?', [now]
+  );
+
+  if (!channels.length) {
+    return editMessage(chatId, msgId,
+      `<b>🔍 Discover Channels</b>\n━━━━━━━━━━━━━━━━━━\n\nNo active channels found yet.`,
+      { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'main_menu')]]) }
+    );
+  }
+
+  let text = `<b>🔍 Discover Channels</b>\n━━━━━━━━━━━━━━━━━━\n`;
+  channels.forEach((ch, i) => {
+    const num = (page - 1) * limit + i + 1;
+    const name = ch.username ? `@${ch.username}` : ch.channel_name;
+    const price = ch.price ? `₹${ch.price / 100}/${ch.plan_type}` : 'Free';
+    const members = ch.member_count || 0;
+    text += `\n<b>${num}.</b> <i>${name}</i>\n    👥 ${members} members · 💰 ${price}`;
+  });
+
+  const buttons = [];
+  const row1 = [], row2 = [];
+  channels.forEach((ch, i) => {
+    const btn = cbButton(`${(page-1)*limit+i+1}`, `discover_channel_${ch.channel_id}`);
+    if (i < 5) row1.push(btn); else row2.push(btn);
+  });
+  if (row1.length) buttons.push(row1);
+  if (row2.length) buttons.push(row2);
+
+  const nav = [];
+  if (page > 1) nav.push(cbButton('◀️ Prev', `discover_channels_page_${page-1}`));
+  if ((total?.c || 0) > page * limit) nav.push(cbButton('Next ▶️', `discover_channels_page_${page+1}`));
+  if (nav.length) buttons.push(nav);
+  buttons.push([cbButton('🔙 Back', 'main_menu')]);
+
+  return editMessage(chatId, msgId, text, { reply_markup: inlineKeyboard(buttons) });
+}
+
+async function showDiscoverChannelDetail(chatId, userId, channelId, msgId) {
+  const now = Date.now();
+  const ch = await require('../../db/d1').d1First(
+    `SELECT c.*, COUNT(s.id) as member_count FROM channels c
+     LEFT JOIN subscriptions s ON s.channel_id = c.channel_id AND s.status='active'
+     WHERE c.channel_id=? AND c.is_active=1`, [channelId]
+  );
+  if (!ch) return editMessage(chatId, msgId, `❌ Channel not found.`, { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'discover_channels')]]) });
+
+  const plans = await require('../../db/d1').d1All(
+    'SELECT * FROM plans WHERE channel_id=? AND is_active=1 ORDER BY price ASC', [channelId]
+  );
+
+  const joinLink = `https://t.me/${process.env.BOT_USERNAME}?start=join_${channelId}`;
+  const name = ch.username ? `@${ch.username}` : ch.channel_name;
+
+  let text = `<b>📢 ${ch.channel_name}</b>\n━━━━━━━━━━━━━━━━━━\n`;
+  text += `👥 <b>Members:</b> ${ch.member_count || 0}\n`;
+  if (plans.length) {
+    text += `\n<b>💎 Available Plans:</b>\n`;
+    plans.forEach(p => { text += `• ${p.plan_type} — ₹${p.price / 100}\n`; });
+  }
+  text += `\n🔗 <b>Join Link:</b> <code>${joinLink}</code>`;
+
+  return editMessage(chatId, msgId, text, {
+    reply_markup: inlineKeyboard([
+      [{ text: '✅ Subscribe Now', url: joinLink }],
+      [cbButton('🔙 Back', 'discover_channels')],
+    ])
+  });
+}
+
+module.exports = { showUserMenu, showProfile, showMemberships, showMembershipDetail, showTransactions, showTransactionDetail, downloadTransactionPDF, showDiscoverChannels, showDiscoverChannelDetail, showSupport, showFAQ };

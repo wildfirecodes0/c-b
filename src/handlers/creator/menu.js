@@ -14,7 +14,7 @@ async function showCreatorMenu(chatId, userId, msgId = null) {
     [cbButton('📢 Channels', 'creator_channels'), cbButton('👥 Members', 'creator_members')],
     [cbButton('💰 Payments', 'creator_payments')],
     [cbButton('📋 Export Members', 'export_members_csv'), cbButton('⚙️ Settings', 'creator_settings')],
-    [cbButton('🎁 Refer & Earn', 'user_refer')],
+    [cbButton('💎 My Memberships', 'creator_my_memberships')],
     [cbButton('❓ Help & Support', 'creator_support')],
   ]);
   if (msgId) return editMessage(chatId, msgId, text, { reply_markup: kb });

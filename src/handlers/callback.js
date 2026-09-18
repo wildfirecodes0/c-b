@@ -80,9 +80,19 @@ async function handleCallback(cb) {
     const { downloadTransactionPDF } = require('./user/menu');
     return downloadTransactionPDF(chatId, userId);
   }
-  if (data === 'user_refer') {
-    const { showReferEarn } = require('./user/menu');
-    return showReferEarn(chatId, userId, msgId);
+  if (data === 'discover_channels' || data === 'discover_channels_page_1') {
+    const { showDiscoverChannels } = require('./user/menu');
+    return showDiscoverChannels(chatId, userId, 1, msgId);
+  }
+  if (data.startsWith('discover_channels_page_')) {
+    const page = parseInt(data.replace('discover_channels_page_', ''));
+    const { showDiscoverChannels } = require('./user/menu');
+    return showDiscoverChannels(chatId, userId, page, msgId);
+  }
+  if (data.startsWith('discover_channel_')) {
+    const channelId = parseInt(data.replace('discover_channel_', ''));
+    const { showDiscoverChannelDetail } = require('./user/menu');
+    return showDiscoverChannelDetail(chatId, userId, channelId, msgId);
   }
   if (data === 'user_profile') {
     const { showProfile } = require('./user/menu');
@@ -251,6 +261,20 @@ async function handleCallback(cb) {
     await setUserSession(userId, 'creator_select_plan_type', { channelId }, msgId);
     const { showPlanSetup } = require('./creator/onboarding');
     return showPlanSetup(chatId, userId, msgId, channelId);
+  }
+  if (data === 'creator_my_memberships' || data === 'creator_my_memberships_page_1') {
+    const { showCreatorMyMemberships } = require('./creator/plans');
+    return showCreatorMyMemberships(chatId, userId, 1, msgId);
+  }
+  if (data.startsWith('creator_my_memberships_page_')) {
+    const page = parseInt(data.replace('creator_my_memberships_page_', ''));
+    const { showCreatorMyMemberships } = require('./creator/plans');
+    return showCreatorMyMemberships(chatId, userId, page, msgId);
+  }
+  if (data.startsWith('creator_membership_detail_')) {
+    const subId = parseInt(data.replace('creator_membership_detail_', ''));
+    const { showCreatorMembershipDetail } = require('./creator/plans');
+    return showCreatorMembershipDetail(chatId, userId, subId, msgId);
   }
   if (data === 'creator_members' || data.startsWith('creator_members_page_')) {
     const page = data.startsWith('creator_members_page_') ? parseInt(data.split('_').pop()) : 1;

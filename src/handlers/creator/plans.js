@@ -185,4 +185,86 @@ async function togglePlanActive(chatId, userId, planId, msgId) {
   return showPlanDetail(chatId, userId, planId, msgId);
 }
 
-module.exports = { showCreatorPlans, showAddPlanChannelSelect, showPlanDetail, togglePlanActive, showCreatorMembers, showMemberDetail, extendMember, removeMember, showCreatorPayments, showCreatorPaymentDetail, downloadCreatorPaymentsPDF, showCreatorSettings, showCreatorPage };
+async function showCreatorMyMemberships(chatId, userId, page = 1, msgId) {
+  const { d1All, d1First } = require('../../db/d1');
+  const limit = 10;
+  const offset = (page - 1) * limit;
+  const now = Date.now();
+
+  const subs = await d1All(
+    `SELECT s.*, p.plan_type, p.price, c.channel_name, c.username as channel_username
+     FROM subscriptions s
+     JOIN plans p ON s.plan_id = p.id
+     JOIN channels c ON s.channel_id = c.channel_id
+     WHERE s.user_id = ? ORDER BY s.created_at DESC LIMIT ? OFFSET ?`,
+    [userId, limit, offset]
+  );
+
+  const total = await d1First('SELECT COUNT(*) as c FROM subscriptions WHERE user_id = ?', [userId]);
+
+  if (!subs.length) {
+    return editMessage(chatId, msgId,
+      `<b>💎 My Memberships</b>\n━━━━━━━━━━━━━━━━━━\n\nYou haven't subscribed to any channel yet.`,
+      { reply_markup: inlineKeyboard([[cbButton('🔍 Discover Channels', 'discover_channels')], [cbButton('🔙 Back', 'creator_menu')]]) }
+    );
+  }
+
+  let text = `<b>💎 My Memberships</b>\n━━━━━━━━━━━━━━━━━━\n`;
+  subs.forEach((s, i) => {
+    const num = (page - 1) * limit + i + 1;
+    const name = s.channel_username ? `@${s.channel_username}` : s.channel_name;
+    const _now = Date.now();
+    let status;
+    if (s.status === 'expired' || s.status === 'cancelled') { status = '❌ Expired'; }
+    else if (s.expires_at <= _now) { status = '❌ Expired'; }
+    else if (s.expires_at <= _now + 3*24*60*60*1000) { status = '⏳ Expiring Soon'; }
+    else { status = '✅ Active'; }
+    text += `\n<b>${num}.</b> <i>${name}</i> → ${status}`;
+  });
+
+  const buttons = [];
+  const row1 = [], row2 = [];
+  subs.forEach((s, i) => {
+    const btn = cbButton(`${(page-1)*limit+i+1}`, `creator_membership_detail_${s.id}`);
+    if (i < 5) row1.push(btn); else row2.push(btn);
+  });
+  if (row1.length) buttons.push(row1);
+  if (row2.length) buttons.push(row2);
+  const nav = [];
+  if (page > 1) nav.push(cbButton('◀️ Prev', `creator_my_memberships_page_${page-1}`));
+  if ((total?.c || 0) > page * limit) nav.push(cbButton('Next ▶️', `creator_my_memberships_page_${page+1}`));
+  if (nav.length) buttons.push(nav);
+  buttons.push([cbButton('🔙 Back', 'creator_menu')]);
+
+  return editMessage(chatId, msgId, text, { reply_markup: inlineKeyboard(buttons) });
+}
+
+async function showCreatorMembershipDetail(chatId, userId, subId, msgId) {
+  const { d1First } = require('../../db/d1');
+  const sub = await d1First(
+    `SELECT s.*, p.plan_type, p.price, c.channel_name, c.username as channel_username
+     FROM subscriptions s JOIN plans p ON s.plan_id = p.id JOIN channels c ON s.channel_id = c.channel_id
+     WHERE s.id = ? AND s.user_id = ?`,
+    [subId, userId]
+  );
+  if (!sub) return;
+  const now = Date.now();
+  let status;
+  if (sub.status === 'expired' || sub.status === 'cancelled') { status = '❌ Expired'; }
+  else if (sub.expires_at <= now) { status = '❌ Expired'; }
+  else if (sub.expires_at <= now + 3*24*60*60*1000) { status = '⏳ Expiring Soon'; }
+  else { status = '✅ Active'; }
+  const name = sub.channel_username ? `@${sub.channel_username}` : sub.channel_name;
+
+  return editMessage(chatId, msgId,
+    `<b>💎 Membership Details</b>\n━━━━━━━━━━━━━━━━━━\n` +
+    `📢 <b>Channel:</b> ${name}\n` +
+    `💳 <b>Plan:</b> ${sub.plan_type} — ₹${sub.price / 100}\n` +
+    `📅 <b>Activated:</b> ${formatDate(sub.activated_at)}\n` +
+    `💥 <b>Expires:</b> ${formatDate(sub.expires_at)}\n` +
+    `🌐 <b>Status:</b> ${status}`,
+    { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'creator_my_memberships')]]) }
+  );
+}
+
+module.exports = { showCreatorPlans, showAddPlanChannelSelect, showPlanDetail, togglePlanActive, showCreatorMembers, showMemberDetail, extendMember, removeMember, showCreatorPayments, showCreatorPaymentDetail, downloadCreatorPaymentsPDF, showCreatorSettings, showCreatorPage, showCreatorMyMemberships, showCreatorMembershipDetail };
