@@ -1,6 +1,8 @@
 'use strict';
 const { getOrCreateApiKey, regenerateApiKey } = require('../db/index');
-const { editMessage, inlineKeyboard, cbButton } = require('../utils/telegram');
+const { editMessage, inlineKeyboard, cbButton, webAppButton } = require('../utils/telegram');
+
+const WEB_APP_URL = 'https://c-b-web.onrender.com/';
 
 // ctx identifies where the user came from, so "Back" returns to the right menu:
 // 'user' -> Profile, 'creator' -> Creator Settings, 'admin' -> Admin Settings
@@ -16,10 +18,10 @@ async function showApiKey(chatId, userId, msgId, ctx = 'user') {
   return editMessage(chatId, msgId,
     `<b>🔑 Your API Key</b>\n━━━━━━━━━━━━━━━━━━\n` +
     `<code>${apiKey}</code>\n\n` +
-    `<i>Use this key to access your account from the Crevio web app (coming soon). It returns the exact same data you see here in the bot.</i>\n\n` +
-    `⚠️ <b>Keep this private!</b> Anyone with this key can view your account data. If it's ever leaked, regenerate it below — the old key stops working immediately.`,
+    `<i>Use this key to access your account from the Crevio web app. It returns the exact same data you see here in the bot.</i>\n\n` +
+    `⚠️ <b>Keep this private!</b> Anyone with this key can view your account data. If it's ever leaked, revoke it below — the old key stops working immediately.`,
     { reply_markup: inlineKeyboard([
-      [cbButton('🔄 Regenerate Key', `api_key_regen_${ctx}`)],
+      [cbButton('🔒 Revoke Key', `api_key_regen_${ctx}`), webAppButton('🌐 Web App', WEB_APP_URL)],
       [cbButton('🔙 Back', backCb)],
     ]) }
   );

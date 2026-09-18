@@ -98,8 +98,8 @@ router.get('/creator/dashboard', requireCreator, async (req, res) => {
   const [channels, members, revenue, monthRevenue, activePlans, expiringSoon] = await Promise.all([
     d1First('SELECT COUNT(*) as c FROM channels WHERE creator_user_id = ?', [userId]),
     d1First("SELECT COUNT(*) as c FROM subscriptions WHERE creator_user_id = ? AND status = 'active'", [userId]),
-    d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE creator_user_id = ? AND status='success'", [userId]),
-    d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE creator_user_id = ? AND status='success' AND created_at >= ?", [userId, Date.now() - 30*24*60*60*1000]),
+    d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE creator_user_id = ? AND status='success' AND plan_id != 0", [userId]),
+    d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE creator_user_id = ? AND status='success' AND plan_id != 0 AND created_at >= ?", [userId, Date.now() - 30*24*60*60*1000]),
     d1First("SELECT COUNT(*) as c FROM plans WHERE creator_user_id = ? AND is_active = 1", [userId]),
     d1First("SELECT COUNT(*) as c FROM subscriptions WHERE creator_user_id = ? AND status='active' AND expires_at <= ?", [userId, Date.now() + 3*24*60*60*1000]),
   ]);
@@ -128,8 +128,8 @@ router.get('/creator/channels/:channelId', requireCreator, async (req, res) => {
   const ch = await d1First('SELECT * FROM channels WHERE channel_id = ? AND creator_user_id = ?', [channelId, req.user.user_id]);
   if (!ch) return res.status(404).json({ error: 'Channel not found.' });
   const [revenue, monthRevenue, activePlans, expiring] = await Promise.all([
-    d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE channel_id = ? AND status='success'", [channelId]),
-    d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE channel_id = ? AND status='success' AND created_at >= ?", [channelId, Date.now() - 30*24*60*60*1000]),
+    d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE channel_id = ? AND status='success' AND plan_id != 0", [channelId]),
+    d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE channel_id = ? AND status='success' AND plan_id != 0 AND created_at >= ?", [channelId, Date.now() - 30*24*60*60*1000]),
     d1First('SELECT COUNT(*) as c FROM plans WHERE channel_id = ? AND is_active = 1', [channelId]),
     d1First("SELECT COUNT(*) as c FROM subscriptions WHERE channel_id = ? AND status='active' AND expires_at <= ?", [channelId, Date.now() + 3*24*60*60*1000]),
   ]);
@@ -170,7 +170,7 @@ router.get('/creator/payments', requireCreator, async (req, res) => {
   const [txns, total] = await Promise.all([
     d1All(`SELECT t.*, u.full_name, c.channel_name, p.plan_type FROM transactions t JOIN users u ON t.user_id=u.user_id JOIN channels c ON t.channel_id=c.channel_id JOIN plans p ON t.plan_id=p.id
            WHERE t.creator_user_id=? ORDER BY t.created_at DESC LIMIT ? OFFSET ?`, [req.user.user_id, limit, offset]),
-    d1First('SELECT COUNT(*) as c FROM transactions WHERE creator_user_id=?', [req.user.user_id]),
+    d1First('SELECT COUNT(*) as c FROM transactions WHERE creator_user_id=? AND plan_id != 0', [req.user.user_id]),
   ]);
   res.json({ page, total: total?.c || 0, payments: txns });
 });
@@ -198,7 +198,7 @@ router.get('/admin/overview', requireAdmin, async (req, res) => {
     d1First("SELECT COALESCE(SUM(platform_fee),0) as t FROM transactions WHERE status='success'"),
     d1First("SELECT COALESCE(SUM(commission),0) as t FROM transactions WHERE status='success'"),
   ]);
-  const topCreators = await d1All("SELECT u.full_name, u.user_id, COALESCE(SUM(t.amount),0) as revenue FROM transactions t JOIN users u ON t.creator_user_id=u.user_id WHERE t.status='success' GROUP BY t.creator_user_id ORDER BY revenue DESC LIMIT 3");
+  const topCreators = await d1All("SELECT u.full_name, u.user_id, COALESCE(SUM(t.amount),0) as revenue FROM transactions t JOIN users u ON t.creator_user_id=u.user_id WHERE t.status='success' AND t.plan_id != 0 GROUP BY t.creator_user_id ORDER BY revenue DESC LIMIT 3");
   res.json({
     revenue_today: today?.t || 0,
     revenue_week: week?.t || 0,

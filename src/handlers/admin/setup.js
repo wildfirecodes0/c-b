@@ -43,8 +43,8 @@ async function showAdminCreatorDetail(chatId, userId, creatorUserId, msgId) {
   const [channels,members,revenue,monthRevenue] = await Promise.all([
     d1First('SELECT COUNT(*) as c FROM channels WHERE creator_user_id=?',[creatorUserId]),
     d1First("SELECT COUNT(*) as c FROM subscriptions WHERE creator_user_id=? AND status='active'",[creatorUserId]),
-    d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE creator_user_id=? AND status='success'",[creatorUserId]),
-    d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE creator_user_id=? AND status='success' AND created_at>=?",[creatorUserId,Date.now()-30*24*60*60*1000]),
+    d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE creator_user_id=? AND status='success' AND plan_id != 0",[creatorUserId]),
+    d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE creator_user_id=? AND status='success' AND plan_id != 0 AND created_at>=?",[creatorUserId,Date.now()-30*24*60*60*1000]),
   ]);
   return editMessage(chatId,msgId,
     `<b>👑 Creator Details</b>\n━━━━━━━━━━━━━━━━━━\n👤 <b>Name:</b> ${creator.full_name}\n🆔 <b>User ID:</b> <code>${creatorUserId}</code>\n🔗 <b>Username:</b> ${creator.username?'@'+creator.username:'N/A'}\n📢 <b>Channels:</b> ${channels?.c||0}\n👥 <b>Members:</b> ${members?.c||0}\n💰 <b>Total Revenue:</b> ₹${(revenue?.t||0)/100}\n📈 <b>This Month:</b> ₹${(monthRevenue?.t||0)/100}\n📅 <b>Joined:</b> ${formatDate(creator.created_at)}\n🌐 <b>Status:</b> ${creator.is_verified?'✅ Verified':'⬜ Unverified'}`,

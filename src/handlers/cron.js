@@ -151,7 +151,7 @@ async function sendWeeklyStats() {
     for (const creator of creators) {
       const [newM, rev, churned] = await Promise.all([
         d1First('SELECT COUNT(*) as c FROM subscriptions WHERE creator_user_id = ? AND created_at >= ?', [creator.user_id, weekAgo]),
-        d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE creator_user_id = ? AND status='success' AND created_at >= ?", [creator.user_id, weekAgo]),
+        d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE creator_user_id = ? AND status='success' AND plan_id != 0 AND created_at >= ?", [creator.user_id, weekAgo]),
         d1First("SELECT COUNT(*) as c FROM subscriptions WHERE creator_user_id = ? AND status='expired' AND updated_at >= ?", [creator.user_id, weekAgo]),
       ]);
       await sendMessage(creator.user_id,

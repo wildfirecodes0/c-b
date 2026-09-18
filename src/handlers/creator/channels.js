@@ -38,8 +38,8 @@ async function showCreatorChannelDetail(chatId, userId, channelId, msgId) {
   const ch = await d1First('SELECT * FROM channels WHERE channel_id = ? AND creator_user_id = ?', [channelId, userId]);
   if (!ch) return;
   const [revenue, monthRevenue, activePlans, expiring] = await Promise.all([
-    d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE channel_id = ? AND status='success'", [channelId]),
-    d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE channel_id = ? AND status='success' AND created_at >= ?", [channelId, Date.now()-30*24*60*60*1000]),
+    d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE channel_id = ? AND status='success' AND plan_id != 0", [channelId]),
+    d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE channel_id = ? AND status='success' AND plan_id != 0 AND created_at >= ?", [channelId, Date.now()-30*24*60*60*1000]),
     d1First('SELECT COUNT(*) as c FROM plans WHERE channel_id = ? AND is_active = 1', [channelId]),
     d1First("SELECT COUNT(*) as c FROM subscriptions WHERE channel_id = ? AND status='active' AND expires_at <= ?", [channelId, Date.now()+3*24*60*60*1000]),
   ]);

@@ -30,8 +30,8 @@ async function showCreatorDashboard(chatId, userId, msgId) {
   const [channels, members, revenue, monthRevenue, activePlans, expiringSoon] = await Promise.all([
     d1First('SELECT COUNT(*) as c FROM channels WHERE creator_user_id = ?', [userId]),
     d1First("SELECT COUNT(*) as c FROM subscriptions WHERE creator_user_id = ? AND status = 'active'", [userId]),
-    d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE creator_user_id = ? AND status='success'", [userId]),
-    d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE creator_user_id = ? AND status='success' AND created_at >= ?", [userId, Date.now() - 30*24*60*60*1000]),
+    d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE creator_user_id = ? AND status='success' AND plan_id != 0", [userId]),
+    d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE creator_user_id = ? AND status='success' AND plan_id != 0 AND created_at >= ?", [userId, Date.now() - 30*24*60*60*1000]),
     d1First("SELECT COUNT(*) as c FROM plans WHERE creator_user_id = ? AND is_active = 1", [userId]),
     d1First("SELECT COUNT(*) as c FROM subscriptions WHERE creator_user_id = ? AND status='active' AND expires_at <= ?", [userId, Date.now() + 3*24*60*60*1000]),
   ]);

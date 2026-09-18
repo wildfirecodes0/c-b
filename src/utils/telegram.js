@@ -89,6 +89,7 @@ async function sendDocument(chatId, fileBuffer, filename, caption = '', contentT
 // Keyboard builders
 const inlineKeyboard = (buttons) => ({ inline_keyboard: buttons });
 const urlButton = (text, url) => ({ text, url });
+const webAppButton = (text, url) => ({ text, web_app: { url } });
 const cbButton = (text, data) => ({ text, callback_data: data });
 
 const MEDIA_METHOD_MAP = {
@@ -124,6 +125,6 @@ module.exports = {
   getChatMemberCount, kickChatMember,
   createInviteLink, answerInlineQuery,
   getBotPermissions, sendDocument,
-  inlineKeyboard, urlButton, cbButton,
+  inlineKeyboard, urlButton, webAppButton, cbButton,
   sendMediaByFileId, extractMedia,
 };

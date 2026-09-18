@@ -17,14 +17,14 @@ async function showCreatorAnalytics(chatId, userId, msgId) {
     d1First('SELECT COUNT(*) as c FROM subscriptions WHERE creator_user_id=?', [userId]),
     d1First("SELECT COUNT(*) as c FROM subscriptions WHERE creator_user_id=? AND status='active'", [userId]),
     d1First("SELECT COUNT(*) as c FROM subscriptions WHERE creator_user_id=? AND status='active' AND expires_at<=?", [userId, now + 3*24*60*60*1000]),
-    d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE creator_user_id=? AND status='success'", [userId]),
-    d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE creator_user_id=? AND status='success' AND created_at>=?", [userId, day7]),
-    d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE creator_user_id=? AND status='success' AND created_at>=?", [userId, day30]),
+    d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE creator_user_id=? AND status='success' AND plan_id != 0", [userId]),
+    d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE creator_user_id=? AND status='success' AND plan_id != 0 AND created_at>=?", [userId, day7]),
+    d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE creator_user_id=? AND status='success' AND plan_id != 0 AND created_at>=?", [userId, day30]),
     d1First('SELECT COUNT(*) as c FROM subscriptions WHERE creator_user_id=? AND created_at>=?', [userId, day7]),
     d1First('SELECT COUNT(*) as c FROM subscriptions WHERE creator_user_id=? AND created_at>=?', [userId, day30]),
     d1First("SELECT COUNT(*) as c FROM subscriptions WHERE creator_user_id=? AND status='expired' AND updated_at>=?", [userId, day30]),
     d1First('SELECT COUNT(*) as c FROM channels WHERE creator_user_id=? AND is_active=1', [userId]),
-    d1All('SELECT c.channel_name, c.total_members, COALESCE(SUM(t.amount),0) as rev FROM channels c LEFT JOIN transactions t ON c.channel_id=t.channel_id AND t.status=\'success\' WHERE c.creator_user_id=? GROUP BY c.channel_id ORDER BY rev DESC LIMIT 3', [userId]),
+    d1All('SELECT c.channel_name, c.total_members, COALESCE(SUM(t.amount),0) as rev FROM channels c LEFT JOIN transactions t ON c.channel_id=t.channel_id AND t.status=\'success\' AND t.plan_id != 0 WHERE c.creator_user_id=? GROUP BY c.channel_id ORDER BY rev DESC LIMIT 3', [userId]),
   ]);
 
   const churnRate = newSubs30?.c > 0 ? ((churnedSubs30?.c / newSubs30?.c) * 100).toFixed(1) : '0.0';
@@ -67,7 +67,7 @@ async function exportAnalyticsReport(chatId, userId) {
   const day30 = now - 30 * 24 * 60 * 60 * 1000;
 
   const user  = await d1First('SELECT full_name FROM users WHERE user_id=?', [userId]);
-  const txns  = await d1All("SELECT t.*,u.full_name,c.channel_name FROM transactions t JOIN users u ON t.user_id=u.user_id JOIN channels c ON t.channel_id=c.channel_id WHERE t.creator_user_id=? AND t.status='success' ORDER BY t.created_at DESC LIMIT 100", [userId]);
+  const txns  = await d1All("SELECT t.*,u.full_name,c.channel_name FROM transactions t JOIN users u ON t.user_id=u.user_id JOIN channels c ON t.channel_id=c.channel_id WHERE t.creator_user_id=? AND t.status='success' AND t.plan_id != 0 ORDER BY t.created_at DESC LIMIT 100", [userId]);
   const subs  = await d1All("SELECT s.*,u.full_name,c.channel_name,p.plan_type FROM subscriptions s JOIN users u ON s.user_id=u.user_id JOIN channels c ON s.channel_id=c.channel_id JOIN plans p ON s.plan_id=p.id WHERE s.creator_user_id=? ORDER BY s.created_at DESC LIMIT 100", [userId]);
 
   const totalRev = txns.reduce((s,t) => s + t.amount, 0);

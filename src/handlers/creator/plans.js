@@ -168,9 +168,13 @@ async function showCreatorPage(chatId, userId, creatorUsername) {
 async function showPlanDetail(chatId, userId, planId, msgId) {
   const plan = await d1First('SELECT p.*, c.channel_name, c.username as channel_username FROM plans p JOIN channels c ON p.channel_id = c.channel_id WHERE p.id = ? AND p.creator_user_id = ?', [planId, userId]);
   if (!plan) return;
+  const [subCount, revSum] = await Promise.all([
+    d1First('SELECT COUNT(*) as c FROM subscriptions WHERE plan_id = ?', [planId]),
+    d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE plan_id = ? AND status='success'", [planId]),
+  ]);
   const name = plan.channel_username ? `@${plan.channel_username}` : plan.channel_name;
   return editMessage(chatId, msgId,
-    `<b>💎 Plan Details</b>\n━━━━━━━━━━━━━━━━━━\n📢 <b>Channel:</b> ${name}\n💎 <b>Type:</b> ${plan.plan_type}\n💰 <b>Price:</b> ₹${plan.price / 100}\n🎁 <b>Trial:</b> ${plan.trial_days} days\n👥 <b>Total Subscribers:</b> ${plan.total_subscribers}\n💰 <b>Total Revenue:</b> ₹${plan.total_revenue / 100}\n🌐 <b>Status:</b> ${plan.is_active ? '✅ Active' : '⏸ Inactive'}`,
+    `<b>💎 Plan Details</b>\n━━━━━━━━━━━━━━━━━━\n📢 <b>Channel:</b> ${name}\n💎 <b>Type:</b> ${plan.plan_type}\n💰 <b>Price:</b> ₹${plan.price / 100}\n🎁 <b>Trial:</b> ${plan.trial_days} days\n👥 <b>Total Subscribers:</b> ${subCount?.c || 0}\n💰 <b>Total Revenue:</b> ₹${(revSum?.t || 0) / 100}\n🌐 <b>Status:</b> ${plan.is_active ? '✅ Active' : '⏸ Inactive'}`,
     { reply_markup: inlineKeyboard([
       [cbButton(plan.is_active ? '⏸ Deactivate' : '▶️ Activate', `toggle_plan_active_${planId}`)],
       [cbButton('🔙 Back to List', 'creator_plans')],
