@@ -2,7 +2,7 @@
 const { getOrCreateApiKey, regenerateApiKey } = require('../db/index');
 const { editMessage, inlineKeyboard, cbButton, webAppButton } = require('../utils/telegram');
 
-const WEB_APP_URL = 'https://c-b-web.onrender.com/';
+const WEB_APP_URL = 'https://creviobot.onrender.com/';
 
 // ctx identifies where the user came from, so "Back" returns to the right menu:
 // 'user' -> Profile, 'creator' -> Creator Settings, 'admin' -> Admin Settings
