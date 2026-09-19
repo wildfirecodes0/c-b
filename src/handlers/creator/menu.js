@@ -30,10 +30,19 @@ async function showCreatorBroadcastPrompt(chatId, userId, msgId) {
     "SELECT COUNT(DISTINCT user_id) as c FROM subscriptions WHERE creator_user_id = ? AND status = 'active'",
     [userId]
   );
+  if (!memberCount?.c) {
+    // No point starting a broadcast session with nobody to send it to — explain why instead.
+    return editMessage(chatId, msgId,
+      `<b>📣 Broadcast to Your Members</b>\n━━━━━━━━━━━━━━━━━━\n` +
+      `🚫 <b>You don't have any active members yet.</b>\n\n` +
+      `Broadcast only reaches people currently subscribed to one of your channels. Once someone joins a paid plan (or a free trial), you'll be able to message them from here.`,
+      { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'creator_menu')]]) }
+    );
+  }
   await setUserSession(userId, 'creator_broadcast_message', {}, msgId);
   return editMessage(chatId, msgId,
     `<b>📣 Broadcast to Your Members</b>\n━━━━━━━━━━━━━━━━━━\n` +
-    `This will be sent to your <b>${memberCount?.c || 0} active member${memberCount?.c === 1 ? '' : 's'}</b> only — across all your channels.\n\n` +
+    `This will be sent to your <b>${memberCount.c} active member${memberCount.c === 1 ? '' : 's'}</b> only — across all your channels.\n\n` +
     `✏️ <b>Send your message now.</b>\n📎 <i>You can also attach a photo, video, voice note, or document.</i>`,
     { reply_markup: inlineKeyboard([[cbButton('❌ Cancel', 'creator_menu')]]) }
   );

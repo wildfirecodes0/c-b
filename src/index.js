@@ -28,7 +28,15 @@ app.get('/cron', async (req, res) => {
 });
 
 // Public REST API — authenticated per-request via the user's 40-char API key.
-// Used by the upcoming Crevio web app; mirrors the bot's own data exactly.
+// Used by the Crevio web app; mirrors the bot's own data exactly.
+app.use('/api/v1', (req, res, next) => {
+  const allowedOrigin = process.env.WEB_APP_ORIGIN || '*'; // set WEB_APP_ORIGIN in Render env vars to lock this down
+  res.header('Access-Control-Allow-Origin', allowedOrigin);
+  res.header('Access-Control-Allow-Headers', 'Content-Type, X-API-Key');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
 app.use('/api/v1', apiRouter);
 
 

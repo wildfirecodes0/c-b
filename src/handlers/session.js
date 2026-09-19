@@ -185,6 +185,10 @@ async function handleSessionInput(msg, session) {
       [userId]
     );
     await clearUserSession(userId);
+    if (!rows.length) {
+      // Their last member's access may have expired between opening this prompt and sending.
+      return editMessage(chatId, msgId, `🚫 <b>You don't have any active members anymore</b> — nothing was sent.`, { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'creator_menu')]]) });
+    }
     const creator = await getUser(userId);
     const caption = `📣 <b>Message from ${creator?.full_name || 'the creator'}</b>\n━━━━━━━━━━━━━━━━━━\n${messageText || ''}`;
     let sent = 0, failed = 0;

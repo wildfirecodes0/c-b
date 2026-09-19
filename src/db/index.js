@@ -169,6 +169,15 @@ async function createPlan(data) {
   return result;
 }
 
+// fields keys are always set by our own server code (never taken raw from a request body),
+// same safety pattern as updateUser/updateChannel/updateCreator above.
+async function updatePlan(planId, fields) {
+  const keys = Object.keys(fields);
+  const vals = Object.values(fields);
+  const set = keys.map(k => `${k} = ?`).join(', ');
+  await d1Run(`UPDATE plans SET ${set}, updated_at = ? WHERE id = ?`, [...vals, Date.now(), planId]);
+}
+
 // ============================================
 // SUBSCRIPTIONS
 // ============================================
@@ -543,7 +552,7 @@ module.exports = {
   getOrCreateApiKey, regenerateApiKey, getUserByApiKey,
   getCreator, createCreator, updateCreator,
   getChannel, createChannel, updateChannel, getCreatorChannels,
-  getPlan, getChannelPlans, createPlan,
+  getPlan, getChannelPlans, createPlan, updatePlan,
   getSubscription, getUserSubscriptions, createSubscription, updateSubscription,
   createPaymentSession, getPaymentSession, updatePaymentSession,
   createTransaction, getUserTransactions,

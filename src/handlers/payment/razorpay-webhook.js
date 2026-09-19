@@ -1,6 +1,6 @@
 'use strict';
 const { hmacSHA256, decrypt, formatDate } = require('../../utils/crypto');
-const { d1First, d1Run } = require('../../db/d1');
+const { d1First, d1Run, d1All } = require('../../db/d1');
 const {
   getPaymentSession, updatePaymentSession,
   createSubscription, createTransaction,
@@ -360,4 +360,52 @@ async function completePlatformFeePayment(session, method) {
   }
 }
 
-module.exports = { handleRazorpayWebhook, processSuccessfulPayment };
+// ---- RECONCILIATION POLLER ----
+// The webhook is the primary way Razorpay payments get recorded, but webhook delivery
+// isn't guaranteed (network blips, a brief server restart, a misconfigured/rotated
+// webhook secret, etc). Without a fallback, a creator or member could genuinely pay and
+// have it silently never show up in Payment History / Revenue anywhere in the bot. This
+// mirrors the TRX poller: periodically ask Razorpay directly whether each still-pending
+// payment link was actually paid, and if so, process it exactly like the webhook would.
+async function pollRazorpayPayments() {
+  try {
+    const pending = await d1All(
+      "SELECT * FROM payment_sessions WHERE method = 'razorpay' AND status = 'pending' AND razorpay_link_id IS NOT NULL AND expires_at > ?",
+      [Date.now()]
+    );
+    for (const session of pending) {
+      await checkRazorpaySession(session);
+    }
+  } catch (err) {
+    console.error('Razorpay poll error:', err.message);
+  }
+}
+
+async function checkRazorpaySession(session) {
+  try {
+    if (!session.razorpay_link_id) return;
+    const fetch = require('node-fetch');
+    const res = await fetch(`https://api.razorpay.com/v1/payment_links/${session.razorpay_link_id}`, {
+      headers: { 'Authorization': 'Basic ' + Buffer.from(`${process.env.RAZORPAY_KEY}:${process.env.RAZORPAY_SECRET}`).toString('base64') },
+    });
+    if (!res.ok) { console.error('Razorpay poll: link fetch failed', res.status, session.razorpay_link_id); return; }
+    const link = await res.json();
+    if (link.status !== 'paid') return;
+
+    const paidPayment = (link.payments || []).find(p => p.status === 'captured' || p.status === 'paid') || link.payments?.[0];
+    const paymentId = paidPayment?.payment_id || paidPayment?.id;
+    if (!paymentId) { console.error('Razorpay poll: link paid but no payment id in response', session.session_id); return; }
+
+    // Idempotency — the webhook may have already processed this in the meantime
+    if (await isPaymentIdUsed(paymentId)) return;
+
+    console.log(`Razorpay poll: recovering missed payment — link=${session.razorpay_link_id} payment=${paymentId} session=${session.session_id}`);
+    await markPaymentIdUsed(paymentId, session.user_id);
+    await updatePaymentSession(session.session_id, { status: 'completed', razorpay_payment_id: paymentId });
+    await processSuccessfulPayment(session, { id: paymentId }, 'razorpay');
+  } catch (err) {
+    console.error('Razorpay session check error:', err.message);
+  }
+}
+
+module.exports = { handleRazorpayWebhook, processSuccessfulPayment, pollRazorpayPayments };

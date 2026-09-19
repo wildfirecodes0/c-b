@@ -8,7 +8,9 @@
 // ============================================
 const express = require('express');
 const { d1All, d1First } = require('../db/d1');
-const { getUserByApiKey, getUser, getCreator, getAdmin } = require('../db/index');
+const { getUserByApiKey, getUser, getCreator, getAdmin,
+  getChannel, updateChannel, getPlan, createPlan, updatePlan, updateCreator, updateUser,
+} = require('../db/index');
 
 const router = express.Router();
 
@@ -191,6 +193,81 @@ router.get('/creator/settings', requireCreator, async (req, res) => {
   });
 });
 
+// ---- CREATOR WRITES ----
+// Every write below re-checks ownership (creator_user_id / channel_id belongs to req.user)
+// before touching a row — the API key alone never lets one creator edit another's data.
+
+router.post('/creator/plans', requireCreator, async (req, res) => {
+  const { channelId, planName, planType, price, trialDays } = req.body || {};
+  if (!channelId || !planName || !planType || price == null) {
+    return res.status(400).json({ error: 'channelId, planName, planType and price are required.' });
+  }
+  const channel = await getChannel(parseInt(channelId));
+  if (!channel || channel.creator_user_id !== req.user.user_id) {
+    return res.status(404).json({ error: 'Channel not found.' });
+  }
+  if (!['monthly', 'yearly', 'lifetime'].includes(planType)) {
+    return res.status(400).json({ error: 'planType must be monthly, yearly or lifetime.' });
+  }
+  const priceInt = parseInt(price);
+  if (!Number.isFinite(priceInt) || priceInt <= 0) return res.status(400).json({ error: 'price must be a positive number, in paise.' });
+  const result = await createPlan({
+    channelId: channel.channel_id, creatorUserId: req.user.user_id,
+    planName, planType, price: priceInt, trialDays: parseInt(trialDays) || 0,
+  });
+  res.status(201).json({ ok: true, id: result?.last_row_id ?? null });
+});
+
+router.put('/creator/plans/:id', requireCreator, async (req, res) => {
+  const plan = await getPlan(parseInt(req.params.id));
+  if (!plan || plan.creator_user_id !== req.user.user_id) return res.status(404).json({ error: 'Plan not found.' });
+  const fields = {};
+  const { planName, price, trialDays, isActive } = req.body || {};
+  if (planName !== undefined) fields.plan_name = planName;
+  if (price !== undefined) {
+    const priceInt = parseInt(price);
+    if (!Number.isFinite(priceInt) || priceInt <= 0) return res.status(400).json({ error: 'price must be a positive number, in paise.' });
+    fields.price = priceInt;
+  }
+  if (trialDays !== undefined) fields.trial_days = parseInt(trialDays) || 0;
+  if (isActive !== undefined) fields.is_active = isActive ? 1 : 0;
+  if (Object.keys(fields).length === 0) return res.status(400).json({ error: 'Nothing to update.' });
+  await updatePlan(plan.id, fields);
+  res.json({ ok: true });
+});
+
+router.delete('/creator/plans/:id', requireCreator, async (req, res) => {
+  const plan = await getPlan(parseInt(req.params.id));
+  if (!plan || plan.creator_user_id !== req.user.user_id) return res.status(404).json({ error: 'Plan not found.' });
+  await updatePlan(plan.id, { is_active: 0 }); // soft delete — keeps history intact for existing subscribers
+  res.json({ ok: true });
+});
+
+router.put('/creator/channels/:channelId', requireCreator, async (req, res) => {
+  const channel = await getChannel(parseInt(req.params.channelId));
+  if (!channel || channel.creator_user_id !== req.user.user_id) return res.status(404).json({ error: 'Channel not found.' });
+  const fields = {};
+  const { description, welcomeMessage, category, maxMembers, isPaused } = req.body || {};
+  if (description !== undefined) fields.description = description;
+  if (welcomeMessage !== undefined) fields.welcome_message = welcomeMessage;
+  if (category !== undefined) fields.category = category;
+  if (maxMembers !== undefined) fields.max_members = maxMembers === null || maxMembers === '' ? null : parseInt(maxMembers);
+  if (isPaused !== undefined) fields.is_paused = isPaused ? 1 : 0;
+  if (Object.keys(fields).length === 0) return res.status(400).json({ error: 'Nothing to update.' });
+  await updateChannel(channel.channel_id, fields);
+  res.json({ ok: true });
+});
+
+router.put('/creator/settings', requireCreator, async (req, res) => {
+  const fields = {};
+  const { trxWallet, useDefaultRazorpay } = req.body || {};
+  if (trxWallet !== undefined) fields.trx_wallet = trxWallet || null;
+  if (useDefaultRazorpay !== undefined) fields.use_default_razorpay = useDefaultRazorpay ? 1 : 0;
+  if (Object.keys(fields).length === 0) return res.status(400).json({ error: 'Nothing to update.' });
+  await updateCreator(req.user.user_id, fields);
+  res.json({ ok: true });
+});
+
 // ============================================
 // ADMIN — mirrors src/handlers/admin/setup.js
 // ============================================
@@ -254,6 +331,48 @@ router.get('/admin/transactions', requireAdmin, async (req, res) => {
     d1First('SELECT COUNT(*) as c FROM transactions'),
   ]);
   res.json({ page, total: total?.c || 0, transactions: txns });
+});
+
+// ---- ADMIN WRITES ----
+
+router.put('/admin/users/:userId/ban', requireAdmin, async (req, res) => {
+  const userId = parseInt(req.params.userId);
+  const target = await getUser(userId);
+  if (!target) return res.status(404).json({ error: 'User not found.' });
+  await updateUser(userId, { is_banned: 1, ban_reason: (req.body && req.body.reason) || null });
+  res.json({ ok: true });
+});
+
+router.put('/admin/users/:userId/unban', requireAdmin, async (req, res) => {
+  const userId = parseInt(req.params.userId);
+  const target = await getUser(userId);
+  if (!target) return res.status(404).json({ error: 'User not found.' });
+  await updateUser(userId, { is_banned: 0, ban_reason: null });
+  res.json({ ok: true });
+});
+
+router.put('/admin/creators/:userId/verify', requireAdmin, async (req, res) => {
+  const userId = parseInt(req.params.userId);
+  const creator = await getCreator(userId);
+  if (!creator) return res.status(404).json({ error: 'Creator not found.' });
+  await updateCreator(userId, { is_verified: 1, verified_at: Date.now() });
+  res.json({ ok: true });
+});
+
+router.put('/admin/creators/:userId/suspend', requireAdmin, async (req, res) => {
+  const userId = parseInt(req.params.userId);
+  const creator = await getCreator(userId);
+  if (!creator) return res.status(404).json({ error: 'Creator not found.' });
+  await updateCreator(userId, { is_suspended: 1, suspend_reason: (req.body && req.body.reason) || null });
+  res.json({ ok: true });
+});
+
+router.put('/admin/creators/:userId/unsuspend', requireAdmin, async (req, res) => {
+  const userId = parseInt(req.params.userId);
+  const creator = await getCreator(userId);
+  if (!creator) return res.status(404).json({ error: 'Creator not found.' });
+  await updateCreator(userId, { is_suspended: 0, suspend_reason: null });
+  res.json({ ok: true });
 });
 
 module.exports = router;

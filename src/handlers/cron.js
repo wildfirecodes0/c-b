@@ -4,6 +4,7 @@ const { d1All, d1Run, d1First } = require('../db/d1');
 const { sendMessage, kickChatMember, inlineKeyboard, cbButton } = require('../utils/telegram');
 const { formatDate } = require('../utils/crypto');
 const { pollTrxPayments } = require('./payment/trx');
+const { pollRazorpayPayments } = require('./payment/razorpay-webhook');
 const { getAdmin } = require('../db/index');
 
 function startCronJobs() {
@@ -20,6 +21,7 @@ function startCronJobs() {
       await Promise.all([
         checkExpiringSubscriptions(),
         pollTrxPayments(),
+        pollRazorpayPayments(),
         expirePaymentSessions(),
         checkCreatorFeeExpiry(),
       ]);
@@ -192,6 +194,8 @@ async function sendWeeklyStats() {
 async function runCronOnce() {
   await Promise.all([
     checkExpiringSubscriptions(),
+    pollTrxPayments(),
+    pollRazorpayPayments(),
     expirePaymentSessions(),
     checkCreatorFeeExpiry(),
   ]);
