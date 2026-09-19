@@ -62,7 +62,7 @@ async function handleCallback(cb) {
     let removed = true;
     if (sub) {
       await d1Run("UPDATE subscriptions SET status='cancelled', updated_at=? WHERE id=?", [Date.now(), subId]);
-      await d1Run('UPDATE channels SET total_members = MAX(0, total_members - 1), updated_at=? WHERE channel_id=?', [Date.now(), sub.channel_id]);
+      await require('../db/index').syncChannelMemberCount(sub.channel_id);
       const { kickChatMember } = require('../utils/telegram');
       try {
         const res = await kickChatMember(sub.channel_id, userId);
@@ -250,10 +250,6 @@ async function handleCallback(cb) {
     const { showFeeRenewal } = require('./creator/onboarding');
     return showFeeRenewal(chatId, userId, parseInt(data.replace('renew_fee_', '')), msgId);
   }
-  if (data.startsWith('claim_free_access_')) {
-    const { handleClaimFreeAccess } = require('./creator/onboarding');
-    return handleClaimFreeAccess(chatId, userId, parseInt(data.replace('claim_free_access_', '')), msgId);
-  }
   if (data === 'creator_plans' || data.startsWith('creator_plans_page_')) {
     const page = data.startsWith('creator_plans_page_') ? parseInt(data.split('_').pop()) : 1;
     const { showCreatorPlans } = require('./creator/plans');
@@ -429,15 +425,17 @@ async function handleCallback(cb) {
   }
   if (data.startsWith('admin_suspend_creator_')) {
     const targetCreatorId = parseInt(data.replace('admin_suspend_creator_', ''));
-    await require('../db/d1').d1Run('UPDATE creators SET is_suspended=1, updated_at=? WHERE user_id=?', [Date.now(), targetCreatorId]);
-    await require('../db/d1').d1Run('UPDATE channels SET is_suspended=1, is_active=0, updated_at=? WHERE creator_user_id=?',[Date.now(),targetCreatorId]);
-    return editMessage(chatId, msgId, '🚫 <b>Creator Suspended!</b>', { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'admin_creators')]]) });
+    const { suspendCreatorAction } = require('./admin/actions');
+    const { notified } = await suspendCreatorAction(targetCreatorId);
+    const note = notified ? '\n📨 Creator has been notified.' : '\n⚠️ Could not notify the creator (they may have blocked the bot).';
+    return editMessage(chatId, msgId, `🚫 <b>Creator Suspended!</b>${note}`, { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'admin_creators')]]) });
   }
   if (data.startsWith('admin_activate_creator_')) {
     const targetCreatorId = parseInt(data.replace('admin_activate_creator_', ''));
-    await require('../db/d1').d1Run('UPDATE creators SET is_suspended=0, updated_at=? WHERE user_id=?', [Date.now(), targetCreatorId]);
-    await require('../db/d1').d1Run('UPDATE channels SET is_suspended=0, is_active=1, updated_at=? WHERE creator_user_id=?',[Date.now(),targetCreatorId]);
-    return editMessage(chatId, msgId, '✅ <b>Creator Activated!</b>', { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'admin_creators')]]) });
+    const { activateCreatorAction } = require('./admin/actions');
+    const { notified } = await activateCreatorAction(targetCreatorId);
+    const note = notified ? '\n📨 Creator has been notified.' : '\n⚠️ Could not notify the creator (they may have blocked the bot).';
+    return editMessage(chatId, msgId, `✅ <b>Creator Activated!</b>${note}`, { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'admin_creators')]]) });
   }
   if (data === 'admin_users' || data.startsWith('admin_users_page_')) {
     const page = data.startsWith('admin_users_page_') ? parseInt(data.split('_').pop()) : 1;
@@ -467,13 +465,17 @@ async function handleCallback(cb) {
   }
   if (data.startsWith('admin_suspend_channel_')) {
     const channelId = parseInt(data.replace('admin_suspend_channel_', ''));
-    await require('../db/d1').d1Run('UPDATE channels SET is_suspended=1, is_active=0, updated_at=? WHERE channel_id=?', [Date.now(), channelId]);
-    return editMessage(chatId, msgId, '🚫 <b>Channel Suspended!</b>', { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'admin_channels')]]) });
+    const { suspendChannelAction } = require('./admin/actions');
+    const { notified } = await suspendChannelAction(channelId);
+    const note = notified ? '\n📨 Creator has been notified.' : '\n⚠️ Could not notify the creator (they may have blocked the bot).';
+    return editMessage(chatId, msgId, `🚫 <b>Channel Suspended!</b>${note}`, { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'admin_channels')]]) });
   }
   if (data.startsWith('admin_activate_channel_')) {
     const channelId = parseInt(data.replace('admin_activate_channel_', ''));
-    await require('../db/d1').d1Run('UPDATE channels SET is_suspended=0, is_active=1, updated_at=? WHERE channel_id=?', [Date.now(), channelId]);
-    return editMessage(chatId, msgId, '✅ <b>Channel Activated!</b>', { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'admin_channels')]]) });
+    const { activateChannelAction } = require('./admin/actions');
+    const { notified } = await activateChannelAction(channelId);
+    const note = notified ? '\n📨 Creator has been notified.' : '\n⚠️ Could not notify the creator (they may have blocked the bot).';
+    return editMessage(chatId, msgId, `✅ <b>Channel Activated!</b>${note}`, { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'admin_channels')]]) });
   }
   if (data === 'admin_transactions' || data.startsWith('admin_transactions_page_')) {
     const page = data.startsWith('admin_transactions_page_') ? parseInt(data.split('_').pop()) : 1;

@@ -157,6 +157,7 @@ async function handleChannelMember(update) {
       const sub = await d1First("SELECT * FROM subscriptions WHERE user_id = ? AND channel_id = ? AND status = 'active'", [userId, chatId]);
       if (sub) {
         await d1Run("UPDATE subscriptions SET status = 'left', updated_at = ? WHERE id = ?", [Date.now(), sub.id]);
+        await require('../db/index').syncChannelMemberCount(sub.channel_id);
         const admin = await getAdmin();
         if (admin) {
           

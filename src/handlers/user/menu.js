@@ -128,18 +128,6 @@ async function downloadTransactionPDF(chatId, userId) {
   await sendDocument(chatId, Buffer.from(html), 'Crevio_Transactions.html', '📊 <b>Your Transaction Report</b>');
 }
 
-async function showReferEarn(chatId, userId, msgId) {
-  const user = await getUser(userId);
-  const total = await d1First('SELECT COUNT(*) as c FROM referrals WHERE referrer_user_id = ?', [userId]);
-  const converted = await d1First("SELECT COUNT(*) as c FROM referrals WHERE referrer_user_id = ? AND status = 'converted'", [userId]);
-  const unclaimed = user.unclaimed_free_days || 0;
-  const link = `https://t.me/${process.env.BOT_USERNAME}?start=ref_${user.referral_code}`;
-  return editMessage(chatId, msgId,
-    `<b>🎁 Refer & Earn</b>\n━━━━━━━━━━━━━━━━━━\n<b>🔗 Your Referral Link:</b>\n<code>${link}</code>\n\n┌─────────────────────────┐\n│ 👥 <b>Total Referrals:</b> ${total?.c||0}   │\n│ ✅ <b>Converted:</b> ${converted?.c||0}         │\n│ 🎁 <b>Lifetime Earned:</b> ${user.free_days_earned||0} days │\n│ 💰 <b>Unclaimed:</b> ${unclaimed} day${unclaimed===1?'':'s'}      │\n└─────────────────────────┘\n\n💡 <i>Earn 1 free day for every friend who subscribes! If you're a creator, claim your unclaimed days anytime from your channel's "Renew Platform Fee" screen.</i>`,
-    { reply_markup: inlineKeyboard([[{ text: '📤 Share Link', switch_inline_query: `Join Crevio! ${link}` }], [cbButton('🔙 Back', 'main_menu')]]) }
-  );
-}
-
 async function showSupport(chatId, userId, msgId) {
   return editMessage(chatId, msgId,
     `<b>❓ Support & Help</b>\n━━━━━━━━━━━━━━━━━━\nHow can we help you today?\n\n💬 <i>Chat with our support team</i>\n📖 <i>Browse FAQs</i>`,
@@ -149,7 +137,7 @@ async function showSupport(chatId, userId, msgId) {
 
 async function showFAQ(chatId, userId, msgId) {
   return editMessage(chatId, msgId,
-    `<b>📖 Frequently Asked Questions</b>\n━━━━━━━━━━━━━━━━━━\n\n<b>1. What is Crevio Bot?</b>\n<i>Crevio Bot helps creators monetize their Telegram channels with paid memberships & auto member management.</i>\n\n<b>2. How do I join a premium channel?</b>\n<i>Browse available channels, select a plan & complete payment — you'll be added automatically.</i>\n\n<b>3. How do I become a creator?</b>\n<i>Tap 🚀 Become a Creator, complete setup & connect your channel.</i>\n\n<b>4. What payment methods are accepted?</b>\n<i>Razorpay (UPI, Cards, Netbanking), TRX (TRC20 - Crypto).</i>\n\n<b>5. What if my membership expires?</b>\n<i>You'll get a reminder 3 days before expiry. After expiry, access is automatically removed.</i>\n\n<b>6. How does referral work?</b>\n<i>Share your referral link — earn 1 free day for every friend who subscribes.</i>\n\n<b>7. Is my payment secure?</b>\n<i>Yes! All payments are processed via secured & verified gateways.</i>`,
+    `<b>📖 Frequently Asked Questions</b>\n━━━━━━━━━━━━━━━━━━\n\n<b>1. What is Crevio Bot?</b>\n<i>Crevio Bot helps creators monetize their Telegram channels with paid memberships & auto member management.</i>\n\n<b>2. How do I join a premium channel?</b>\n<i>Browse available channels, select a plan & complete payment — you'll be added automatically.</i>\n\n<b>3. How do I become a creator?</b>\n<i>Tap 🚀 Become a Creator, complete setup & connect your channel.</i>\n\n<b>4. What payment methods are accepted?</b>\n<i>Razorpay (UPI, Cards, Netbanking), TRX (TRC20 - Crypto).</i>\n\n<b>5. What if my membership expires?</b>\n<i>You'll get a reminder 3 days before expiry. After expiry, access is automatically removed.</i>\n\n<b>6. Is my payment secure?</b>\n<i>Yes! All payments are processed via secured & verified gateways.</i>`,
     { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'user_support')]]) }
   );
 }
@@ -171,12 +159,11 @@ async function showDiscoverChannels(chatId, userId, page = 1, msgId, sort = 'pop
 
   const channels = await require('../../db/d1').d1All(
     `SELECT c.channel_id, c.channel_name, c.username, c.type,
-            COUNT(s.id) as member_count,
+            (SELECT COUNT(*) FROM subscriptions s WHERE s.channel_id = c.channel_id AND s.status = 'active') as member_count,
             p.plan_type, MIN(p.price) as price
      FROM channels c
-     LEFT JOIN subscriptions s ON s.channel_id = c.channel_id AND s.status = 'active'
      LEFT JOIN plans p ON p.channel_id = c.channel_id AND p.is_active = 1
-     WHERE c.is_active = 1 AND c.platform_fee_expires_at > ? ${cfg.extraWhere}
+     WHERE c.is_active = 1 AND c.is_suspended = 0 AND c.platform_fee_expires_at > ? ${cfg.extraWhere}
      GROUP BY c.channel_id
      ORDER BY ${cfg.orderBy}
      LIMIT ? OFFSET ?`,
@@ -187,7 +174,7 @@ async function showDiscoverChannels(chatId, userId, page = 1, msgId, sort = 'pop
     `SELECT COUNT(*) as c FROM (
        SELECT c.channel_id FROM channels c
        LEFT JOIN plans p ON p.channel_id = c.channel_id AND p.is_active = 1
-       WHERE c.is_active=1 AND c.platform_fee_expires_at > ? ${cfg.extraWhere}
+       WHERE c.is_active=1 AND c.is_suspended=0 AND c.platform_fee_expires_at > ? ${cfg.extraWhere}
        GROUP BY c.channel_id
      )`, [now]
   );
@@ -244,9 +231,9 @@ async function showDiscoverFilterMenu(chatId, userId, page, msgId, sort = 'popul
 async function showDiscoverChannelDetail(chatId, userId, channelId, msgId) {
   const now = Date.now();
   const ch = await require('../../db/d1').d1First(
-    `SELECT c.*, COUNT(s.id) as member_count FROM channels c
-     LEFT JOIN subscriptions s ON s.channel_id = c.channel_id AND s.status='active'
-     WHERE c.channel_id=? AND c.is_active=1`, [channelId]
+    `SELECT c.*, (SELECT COUNT(*) FROM subscriptions s WHERE s.channel_id = c.channel_id AND s.status='active') as member_count
+     FROM channels c
+     WHERE c.channel_id=? AND c.is_active=1 AND c.is_suspended=0`, [channelId]
   );
   if (!ch) return editMessage(chatId, msgId, `❌ Channel not found.`, { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'discover_channels')]]) });
 

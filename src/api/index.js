@@ -56,8 +56,6 @@ router.get('/me', async (req, res) => {
     full_name: user.full_name,
     joined_at: user.created_at,
     active_plans: activeSubs?.c || 0,
-    free_days_earned: user.free_days_earned || 0,
-    referral_code: user.referral_code,
     is_creator: req.isCreator,
     is_admin: req.isAdmin,
   });
@@ -339,16 +337,18 @@ router.put('/admin/users/:userId/ban', requireAdmin, async (req, res) => {
   const userId = parseInt(req.params.userId);
   const target = await getUser(userId);
   if (!target) return res.status(404).json({ error: 'User not found.' });
-  await updateUser(userId, { is_banned: 1, ban_reason: (req.body && req.body.reason) || null });
-  res.json({ ok: true });
+  const { banUserAction } = require('../handlers/admin/actions');
+  const { failedRemovals, notified } = await banUserAction(userId, (req.body && req.body.reason) || null);
+  res.json({ ok: true, notified, failed_removals: failedRemovals });
 });
 
 router.put('/admin/users/:userId/unban', requireAdmin, async (req, res) => {
   const userId = parseInt(req.params.userId);
   const target = await getUser(userId);
   if (!target) return res.status(404).json({ error: 'User not found.' });
-  await updateUser(userId, { is_banned: 0, ban_reason: null });
-  res.json({ ok: true });
+  const { unbanUserAction } = require('../handlers/admin/actions');
+  const { notified } = await unbanUserAction(userId);
+  res.json({ ok: true, notified });
 });
 
 router.put('/admin/creators/:userId/verify', requireAdmin, async (req, res) => {
@@ -363,16 +363,18 @@ router.put('/admin/creators/:userId/suspend', requireAdmin, async (req, res) => 
   const userId = parseInt(req.params.userId);
   const creator = await getCreator(userId);
   if (!creator) return res.status(404).json({ error: 'Creator not found.' });
-  await updateCreator(userId, { is_suspended: 1, suspend_reason: (req.body && req.body.reason) || null });
-  res.json({ ok: true });
+  const { suspendCreatorAction } = require('../handlers/admin/actions');
+  const { notified } = await suspendCreatorAction(userId, (req.body && req.body.reason) || null);
+  res.json({ ok: true, notified });
 });
 
 router.put('/admin/creators/:userId/unsuspend', requireAdmin, async (req, res) => {
   const userId = parseInt(req.params.userId);
   const creator = await getCreator(userId);
   if (!creator) return res.status(404).json({ error: 'Creator not found.' });
-  await updateCreator(userId, { is_suspended: 0, suspend_reason: null });
-  res.json({ ok: true });
+  const { activateCreatorAction } = require('../handlers/admin/actions');
+  const { notified } = await activateCreatorAction(userId);
+  res.json({ ok: true, notified });
 });
 
 module.exports = router;

@@ -140,16 +140,9 @@ async function showPlanSetup(chatId, userId, msgId, channelId = null) {
 async function showPlatformFeePayment(chatId, userId, msgId) {
   const settings = await getBotSettings();
   const fee = (settings?.platform_fee || 4900) / 100;
-  const { getUser } = require('../../db/index');
-  const user = await getUser(userId);
-  const unclaimed = user?.unclaimed_free_days || 0;
 
   let text = `<b>💰 Step 4/4 — Platform Fee</b>\n━━━━━━━━━━━━━━━━━━\n💰 <b>One Time Fee:</b> ₹${fee} per channel\n\n`;
   const buttons = [];
-  if (unclaimed > 0) {
-    text += `🎁 <b>You have ${unclaimed} free day${unclaimed === 1 ? '' : 's'} from referrals!</b>\n` +
-            `<i>You can cover ${unclaimed} day${unclaimed === 1 ? '' : 's'} of your membership free — but platform fee (₹${fee}) must be paid first to activate the channel. Claim free days after activation from "Renew Platform Fee" screen.</i>\n\n`;
-  }
   text += `Pay via:`;
   buttons.push([cbButton('💳 Pay via Razorpay', 'fee_pay_razorpay')]);
   buttons.push([cbButton('🪙 Pay via TRX', 'fee_pay_trx')]);
@@ -175,7 +168,7 @@ async function initPlatformFeePayment(chatId, userId, msgId, method) {
     const feeAmount = settings?.platform_fee || 4900; // paise
 
     // ✅ NOTHING inserted into DB yet — all data stays in session until payment succeeds
-    const sessionId = generateToken(16);
+    const sessionId = 'FEE_' + generateToken(16); // FEE_ prefix marks a platform-fee payment session
     const expiresAt = Date.now() + 30 * 60 * 1000;
 
     return await createFeePaymentSession(chatId, userId, msgId, {
@@ -269,8 +262,12 @@ async function createFeePaymentSession(chatId, userId, msgId, opts) {
         { reply_markup: inlineKeyboard([[cbButton('🔙 Back', backCbData)]]) });
     }
     const { getTRXRate } = require('../../db/index');
-    let trxRate = 10;
-    try { trxRate = await getTRXRate(); } catch (e) { console.error('getTRXRate error:', e.message); }
+    let trxRate;
+    try { trxRate = await getTRXRate(); } catch (e) {
+      console.error('getTRXRate error:', e.message);
+      return editMessage(chatId, msgId, `❌ <b>TRX payment is unavailable right now.</b>\n\n<i>Could not fetch the live TRX price. Please try again in a few minutes or pay via Razorpay.</i>`,
+        { reply_markup: inlineKeyboard([[cbButton('🔙 Back', backCbData)]]) });
+    }
     const amountTrx = (feeAmount / 100 / trxRate).toFixed(2);
 
     try {
@@ -308,36 +305,15 @@ async function showFeeRenewal(chatId, userId, channelId, msgId) {
   if (!ch) return;
   const settings = await getBotSettings();
   const fee = (settings?.platform_fee || 4900) / 100;
-  const { getUser } = require('../../db/index');
-  const user = await getUser(userId);
-  const unclaimed = user?.unclaimed_free_days || 0;
 
   let text = `<b>💰 Renew Platform Fee</b>\n━━━━━━━━━━━━━━━━━━\n📢 <b>Channel:</b> ${ch.channel_name}\n💰 <b>Fee:</b> ₹${fee}\n\n`;
   const buttons = [];
-  if (unclaimed > 0) {
-    text += `<i>🎁 You've earned</i> <b>${unclaimed} free day${unclaimed === 1 ? '' : 's'}</b> <i>from referring friends!</i>\n\n` +
-            `<b><u>💡 Refer more friends to stay free for longer!</u></b>\n\n`;
-    buttons.push([cbButton('🆓 Claim FREE Access', `claim_free_access_${channelId}`)]);
-  }
   text += `Pay via:`;
   buttons.push([cbButton('💳 Pay via Razorpay', `renew_fee_razorpay_${channelId}`)]);
   buttons.push([cbButton('🪙 Pay via TRX', `renew_fee_trx_${channelId}`)]);
   buttons.push([cbButton('🔙 Back', `creator_channel_detail_${channelId}`)]);
 
   return editMessage(chatId, msgId, text, { reply_markup: inlineKeyboard(buttons) });
-}
-
-async function handleClaimFreeAccess(chatId, userId, channelId, msgId) {
-  const { claimFreeAccess } = require('../../db/index');
-  const result = await claimFreeAccess(userId, channelId);
-  if (!result.claimed) {
-    return showFeeRenewal(chatId, userId, channelId, msgId);
-  }
-  const ch = await d1First('SELECT channel_name FROM channels WHERE channel_id = ?', [channelId]);
-  return editMessage(chatId, msgId,
-    `✅ <b>Free Access Claimed!</b>\n━━━━━━━━━━━━━━━━━━\n🎁 <b>${result.claimed} free day${result.claimed === 1 ? '' : 's'}</b> applied to <b>${ch?.channel_name}</b>!\n📅 <b>New Expiry:</b> ${formatDate(result.newExpiry)}\n\n<i>Your lifetime referral count is unaffected — keep referring to bank more free days!</i>`,
-    { reply_markup: inlineKeyboard([[cbButton('🔙 Back to Channel', `creator_channel_detail_${channelId}`)]]) }
-  );
 }
 
 async function initFeeRenewal(chatId, userId, channelId, msgId, method) {
@@ -353,7 +329,7 @@ async function initFeeRenewal(chatId, userId, channelId, msgId, method) {
 
     const settings = await getBotSettings();
     const feeAmount = settings?.platform_fee || 4900;
-    const sessionId = generateToken(16);
+    const sessionId = 'FEE_' + generateToken(16); // FEE_ prefix marks a platform-fee payment session
     const expiresAt = Date.now() + 30 * 60 * 1000;
 
     return await createFeePaymentSession(chatId, userId, msgId, {
@@ -370,5 +346,5 @@ async function initFeeRenewal(chatId, userId, channelId, msgId, method) {
 module.exports = {
   showBecomeCreator, startCreatorSetup, handleChannelInput, showGatewaySetup,
   showPlanSetup, showPlatformFeePayment, initPlatformFeePayment,
-  showFeeRenewal, initFeeRenewal, handleClaimFreeAccess,
+  showFeeRenewal, initFeeRenewal,
 };

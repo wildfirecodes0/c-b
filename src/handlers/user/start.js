@@ -15,14 +15,7 @@ async function handleStart(msg) {
 
   let user = await getUser(userId);
   if (!user) {
-    const referralCode = genToken(8);
-    let referredBy = null;
-    if (param?.startsWith('ref_')) {
-      const refCode = param.replace('ref_', '');
-      const refUser = await d1First('SELECT user_id FROM users WHERE referral_code = ?', [refCode]);
-      if (refUser && refUser.user_id !== userId) referredBy = refUser.user_id;
-    }
-    user = await createUser({ userId, username, fullName: firstName, referralCode, referredBy });
+    user = await createUser({ userId, username, fullName: firstName });
     await notifyAdmin('new_user', user);
   }
 

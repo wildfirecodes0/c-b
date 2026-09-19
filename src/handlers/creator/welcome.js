@@ -45,10 +45,12 @@ async function deleteWelcomeMessage(chatId, userId, channelId, msgId) {
 async function sendWelcomeMessage(channel, user, expiresAt) {
   try {
     if (!channel.welcome_message) return;
+    // Replace every placeholder occurrence; values are HTML-escaped so a name like "A<B" can't break the message.
+    const esc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const text = channel.welcome_message
-      .replace('{name}', user.full_name)
-      .replace('{channel}', channel.channel_name)
-      .replace('{expires}', formatDate(expiresAt));
+      .split('{name}').join(esc(user.full_name))
+      .split('{channel}').join(esc(channel.channel_name))
+      .split('{expires}').join(formatDate(expiresAt));
     await sendMessage(user.user_id, `👋 <b>Welcome to ${channel.channel_name}!</b>\n\n${text}`);
   } catch (e) { console.error('sendWelcomeMessage error:', e.message); }
 }

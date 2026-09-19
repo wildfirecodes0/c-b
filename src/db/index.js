@@ -19,16 +19,10 @@ async function createUser(data) {
   const now = Date.now();
   const apiKey = generateToken(40);
   await d1Run(
-    `INSERT INTO users (user_id, username, full_name, language, role, tos_accepted, referral_code, referred_by, api_key, created_at, updated_at)
-     VALUES (?, ?, ?, 'en', 'user', 0, ?, ?, ?, ?, ?)`,
-    [data.userId, data.username || null, data.fullName, data.referralCode, data.referredBy || null, apiKey, now, now]
+    `INSERT INTO users (user_id, username, full_name, language, role, tos_accepted, api_key, created_at, updated_at)
+     VALUES (?, ?, ?, 'en', 'user', 0, ?, ?, ?)`,
+    [data.userId, data.username || null, data.fullName, apiKey, now, now]
   );
-  if (data.referredBy) {
-    await d1Run(
-      `INSERT INTO referrals (referrer_user_id, referred_user_id, status, created_at) VALUES (?, ?, 'pending', ?)`,
-      [data.referredBy, data.userId, now]
-    );
-  }
   return getUser(data.userId);
 }
 
@@ -208,6 +202,26 @@ async function createSubscription(data) {
     [data.userId, data.channelId, data.planId, data.creatorUserId,
      data.isTrial ? 1 : 0, now, data.expiresAt, data.expiresAt + (24 * 60 * 60 * 1000), now, now]
   );
+}
+
+// ---- Channel member count ----
+// channels.total_members used to be maintained with manual +1 / -1 counters, which drifted
+// (renewals were counted as new members, bans / leaves / creator extensions never adjusted it).
+// It is now always RE-COUNTED from the subscriptions table, so it can never drift.
+async function syncChannelMemberCount(channelId) {
+  await d1Run(
+    "UPDATE channels SET total_members = (SELECT COUNT(*) FROM subscriptions WHERE channel_id = ? AND status = 'active'), updated_at = ? WHERE channel_id = ?",
+    [channelId, Date.now(), channelId]
+  );
+  cache.del(`channel:${channelId}`);
+}
+
+// Heals every channel at once (run on startup and hourly by cron).
+async function syncAllMemberCounts() {
+  await d1Run(
+    "UPDATE channels SET total_members = (SELECT COUNT(*) FROM subscriptions s WHERE s.channel_id = channels.channel_id AND s.status = 'active') WHERE total_members != (SELECT COUNT(*) FROM subscriptions s WHERE s.channel_id = channels.channel_id AND s.status = 'active')"
+  );
+  cache.delPrefix('channel:');
 }
 
 async function updateSubscription(id, fields) {
@@ -416,58 +430,6 @@ async function markTrialUsed(userId, channelId, expiresAt) {
 }
 
 // ============================================
-// REFERRALS
-// ============================================
-const ONE_DAY_MS = 24 * 60 * 60 * 1000;
-
-async function handleReferralReward(referrerUserId, referredUserId) {
-  const referral = await d1First(
-    "SELECT * FROM referrals WHERE referrer_user_id = ? AND referred_user_id = ?",
-    [referrerUserId, referredUserId]
-  );
-  if (!referral || referral.status === 'converted') return false; // already rewarded, or no such referral
-  await d1Run(
-    "UPDATE referrals SET status='converted', converted_at=?, free_days_given=1 WHERE id=?",
-    [Date.now(), referral.id]
-  );
-  // free_days_earned = lifetime total (never decreases, just a stat).
-  // unclaimed_free_days = the actual claimable balance (goes to 0 once claimed).
-  await d1Run(
-    'UPDATE users SET free_days_earned = COALESCE(free_days_earned, 0) + 1, unclaimed_free_days = COALESCE(unclaimed_free_days, 0) + 1, updated_at = ? WHERE user_id = ?',
-    [Date.now(), referrerUserId]
-  );
-  cache.del(`user:${referrerUserId}`);
-  return true;
-}
-
-// Applies ALL of the user's unclaimed free days to one specific channel's platform
-// fee at once (an all-or-nothing claim), then resets the unclaimed balance to 0.
-// The lifetime free_days_earned stat is untouched, so past referrals still count.
-async function claimFreeAccess(userId, channelId) {
-  const user = await getUser(userId);
-  const days = user?.unclaimed_free_days || 0;
-  if (days <= 0) return { claimed: 0 };
-
-  const ch = await d1First('SELECT channel_id, platform_fee_expires_at FROM channels WHERE channel_id = ? AND creator_user_id = ?', [channelId, userId]);
-  if (!ch) return { claimed: 0 };
-
-  const now = Date.now();
-  const base = (ch.platform_fee_expires_at && ch.platform_fee_expires_at > now) ? ch.platform_fee_expires_at : now;
-  const newExpiry = base + days * ONE_DAY_MS;
-
-  await d1Run(
-    "UPDATE channels SET platform_fee_expires_at = ?, platform_fee_paid = 1, is_active = 1, is_suspended = 0, suspend_reason = NULL, fee_reminder_sent = 0, updated_at = ? WHERE channel_id = ?",
-    [newExpiry, now, channelId]
-  );
-  cache.del(`channel:${channelId}`);
-
-  await d1Run('UPDATE users SET unclaimed_free_days = 0, updated_at = ? WHERE user_id = ?', [now, userId]);
-  cache.del(`user:${userId}`);
-
-  return { claimed: days, newExpiry };
-}
-
-// ============================================
 // COUPONS
 // ============================================
 async function getCoupon(code) {
@@ -523,16 +485,59 @@ async function recordCodeUsage(type, recordId, userId, transactionId = null) {
 // ============================================
 // USDT RATE
 // ============================================
+// ---- TRX/INR rate ----
+// Tries several free price sources in order. If every source fails it falls back to the last
+// good rate (up to 6h old); if there is none it THROWS instead of guessing — a wrong hard-coded
+// rate used to be shown to users (e.g. Rs.49 = 4.90 TRX instead of ~1.5 TRX).
+let lastGoodTrxRate = null; // { rate, at }
+const TRX_STALE_MAX_MS = 6 * 60 * 60 * 1000;
+
+function saneTrxRate(r) { return Number.isFinite(r) && r > 1 && r < 1000 ? r : null; }
+
+async function fetchJson(url) {
+  const res = await fetch(url, { signal: AbortSignal.timeout(8000), headers: { accept: 'application/json' } });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+const TRX_RATE_SOURCES = [
+  ['coingecko', async () => (await fetchJson('https://api.coingecko.com/api/v3/simple/price?ids=tron&vs_currencies=inr')).tron?.inr],
+  ['coindcx', async () => {
+    const list = await fetchJson('https://public.coindcx.com/market_data/ticker');
+    const row = Array.isArray(list) ? list.find((m) => m.market === 'TRXINR') : null;
+    return row ? parseFloat(row.last_price) : null;
+  }],
+  ['binance', async () => {
+    // TRX/USDT x USDT/INR (both from Binance) as the last live fallback
+    const trx = parseFloat((await fetchJson('https://api.binance.com/api/v3/ticker/price?symbol=TRXUSDT')).price);
+    const usd = await fetchJson('https://open.er-api.com/v6/latest/USD');
+    return trx * usd?.rates?.INR;
+  }],
+];
+
 async function getTRXRate() {
-  const cached = cache.get("trxRate");
+  const cached = cache.get('trxRate');
   if (cached) return cached;
-  try {
-    const res = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=tron&vs_currencies=inr");
-    const data = await res.json();
-    const rate = data.tron?.inr || 10;
-    cache.set("trxRate", rate, 120);
-    return rate;
-  } catch { return 10; }
+
+  for (const [name, fn] of TRX_RATE_SOURCES) {
+    try {
+      const rate = saneTrxRate(Number(await fn()));
+      if (rate) {
+        lastGoodTrxRate = { rate, at: Date.now() };
+        cache.set('trxRate', rate, 2 * 60 * 1000); // NOTE: cache TTL is in milliseconds
+        return rate;
+      }
+      console.error(`getTRXRate: ${name} returned an unusable value`);
+    } catch (err) {
+      console.error(`getTRXRate: ${name} failed:`, err.message);
+    }
+  }
+
+  if (lastGoodTrxRate && Date.now() - lastGoodTrxRate.at < TRX_STALE_MAX_MS) {
+    console.error('getTRXRate: all sources failed, using last known rate', lastGoodTrxRate.rate);
+    return lastGoodTrxRate.rate;
+  }
+  throw new Error('TRX_RATE_UNAVAILABLE');
 }
 
 async function getUSDTRate() {
@@ -554,6 +559,7 @@ module.exports = {
   getChannel, createChannel, updateChannel, getCreatorChannels,
   getPlan, getChannelPlans, createPlan, updatePlan,
   getSubscription, getUserSubscriptions, createSubscription, updateSubscription,
+  syncChannelMemberCount, syncAllMemberCounts,
   createPaymentSession, getPaymentSession, updatePaymentSession,
   createTransaction, getUserTransactions,
   isPaymentIdUsed, markPaymentIdUsed,
@@ -563,7 +569,6 @@ module.exports = {
   getBotSettings, updateBotSettings, initBotSettings,
   checkRateLimit,
   hasUsedTrial, markTrialUsed,
-  handleReferralReward, claimFreeAccess,
   getCoupon,
   validateDiscountCode, recordCodeUsage,
   getUSDTRate,

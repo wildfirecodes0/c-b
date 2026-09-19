@@ -63,4 +63,6 @@ app.post('/webhook/razorpay/:creatorId', async (req, res) => {
 });
 
 startCronJobs();
+// One-time heal of any drifted member counts left over from the old +1/-1 counter logic.
+require('./db/index').syncAllMemberCounts().catch(err => console.error('Startup member count sync error:', err.message));
 app.listen(PORT, () => console.log(`✅ Crevio Bot running on port ${PORT}`));
