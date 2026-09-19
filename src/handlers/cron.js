@@ -80,15 +80,42 @@ async function checkExpiringSubscriptions() {
      )`, [now, now, now]
   );
   for (const sub of expired) {
-    try { await kickChatMember(sub.channel_id, sub.user_id); } catch (e) {}
+    let kicked = { ok: false };
+    try {
+      kicked = await kickChatMember(sub.channel_id, sub.user_id);
+    } catch (e) {
+      console.error(`Kick error for sub ${sub.id} (user ${sub.user_id}, channel ${sub.channel_id}):`, e.message);
+    }
+
+    if (!kicked.ok) {
+      // Removal actually failed (bot lost admin/ban rights in this channel, etc.) —
+      // leave the subscription 'active' so we retry the kick every minute until it
+      // succeeds, instead of falsely marking it expired and telling the member
+      // "your access has been removed" while they're still sitting in the channel.
+      console.error(`⚠️ Could not remove expired member ${sub.user_id} from channel ${sub.channel_id} (sub ${sub.id}): ${kicked.description || 'unknown reason'}`);
+      const admin = await getAdmin();
+      if (admin) {
+        try {
+          await sendMessage(admin.user_id,
+            `⚠️ <b>Auto-Remove Failed!</b>\n━━━━━━━━━━━━━━━━━━\n👤 <code>${sub.user_id}</code>\n📢 <b>Channel:</b> ${sub.channel_name}\n❗ <b>Reason:</b> ${kicked.description || 'Unknown'}\n\nThe bot likely lost admin/ban rights in this channel. Their subscription has expired but they could NOT be removed — please check the bot's permissions there. It will keep retrying automatically.`
+          );
+        } catch (e) { console.error('Kick-failure admin alert error:', e.message); }
+      }
+      continue;
+    }
+
     await d1Run("UPDATE subscriptions SET status = 'expired', updated_at = ? WHERE id = ?", [now, sub.id]);
     await d1Run('UPDATE channels SET total_members = MAX(0, total_members - 1), updated_at = ? WHERE channel_id = ?', [now, sub.channel_id]);
-    await sendMessage(sub.user_id,
-      `❌ <b>Subscription Expired!</b>\n━━━━━━━━━━━━━━━━━━\n📢 <b>Channel:</b> ${sub.channel_name}\n\nYour access has been removed. Renew to rejoin!`,
-      { reply_markup: inlineKeyboard([[cbButton('🔄 Renew Now', `renew_${sub.channel_id}`)]]) }
-    );
-    const admin = await getAdmin();
-    if (admin) await sendMessage(admin.user_id, `🚫 <b>Member Auto Kicked!</b>\n👤 <code>${sub.user_id}</code>\n📢 ${sub.channel_name}`);
+    try {
+      await sendMessage(sub.user_id,
+        `❌ <b>Subscription Expired!</b>\n━━━━━━━━━━━━━━━━━━\n📢 <b>Channel:</b> ${sub.channel_name}\n\nYour access has been removed. Renew to rejoin!`,
+        { reply_markup: inlineKeyboard([[cbButton('🔄 Renew Now', `renew_${sub.channel_id}`)]]) }
+      );
+    } catch (e) { console.error(`Expiry notify (user ${sub.user_id}) error:`, e.message); }
+    try {
+      const admin = await getAdmin();
+      if (admin) await sendMessage(admin.user_id, `🚫 <b>Member Auto Kicked!</b>\n👤 <code>${sub.user_id}</code>\n📢 ${sub.channel_name}`);
+    } catch (e) { console.error('Kick admin notify error:', e.message); }
     if (sub.creator_user_id) {
       const kind = sub.is_trial ? '🎁 Free Trial' : '💎 Subscription';
       try {

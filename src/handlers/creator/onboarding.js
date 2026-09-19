@@ -344,11 +344,12 @@ async function initFeeRenewal(chatId, userId, channelId, msgId, method) {
   try {
     const ch = await d1First('SELECT * FROM channels WHERE channel_id = ? AND creator_user_id = ?', [channelId, userId]);
     if (!ch) return editMessage(chatId, msgId, `❌ <b>Channel not found.</b>`, { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'creator_channels')]]) });
+    // A plan is NOT required to renew the platform fee — this fee is for the channel's
+    // existence on the platform, independent of whether it currently has a monetization
+    // plan set up. (createFeePaymentSession already falls back to planId=0 when none exists,
+    // same as the first-time onboarding flow.) Requiring one here used to permanently lock
+    // out any creator who deleted/deactivated their only plan.
     const plan = await d1First('SELECT id FROM plans WHERE channel_id = ? ORDER BY id ASC LIMIT 1', [channelId]);
-    if (!plan) {
-      return editMessage(chatId, msgId, `❌ <b>No plan found for this channel.</b>`,
-        { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'creator_channels')]]) });
-    }
 
     const settings = await getBotSettings();
     const feeAmount = settings?.platform_fee || 4900;
@@ -356,7 +357,7 @@ async function initFeeRenewal(chatId, userId, channelId, msgId, method) {
     const expiresAt = Date.now() + 30 * 60 * 1000;
 
     return await createFeePaymentSession(chatId, userId, msgId, {
-      channelId, channelName: ch.channel_name, planId: plan.id,
+      channelId, channelName: ch.channel_name, planId: plan?.id || null,
       feeAmount, sessionId, expiresAt, method, backCbData: `renew_fee_${channelId}`,
     });
   } catch (err) {

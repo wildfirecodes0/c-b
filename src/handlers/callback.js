@@ -59,13 +59,21 @@ async function handleCallback(cb) {
     const subId = parseInt(data.replace('cancel_sub_', ''));
     const { d1First, d1Run } = require('../db/d1');
     const sub = await d1First("SELECT * FROM subscriptions WHERE id = ? AND user_id = ?", [subId, userId]);
+    let removed = true;
     if (sub) {
       await d1Run("UPDATE subscriptions SET status='cancelled', updated_at=? WHERE id=?", [Date.now(), subId]);
       await d1Run('UPDATE channels SET total_members = MAX(0, total_members - 1), updated_at=? WHERE channel_id=?', [Date.now(), sub.channel_id]);
       const { kickChatMember } = require('../utils/telegram');
-      try { await kickChatMember(sub.channel_id, userId); } catch (e) {}
+      try {
+        const res = await kickChatMember(sub.channel_id, userId);
+        removed = !!res?.ok;
+        if (!removed) console.error(`cancel_sub: failed to remove user ${userId} from channel ${sub.channel_id}:`, res?.description);
+      } catch (e) { removed = false; console.error('cancel_sub kick error:', e.message); }
     }
-    return editMessage(chatId, msgId, '✅ <b>Subscription Cancelled!</b>\n\nYou have been removed from the channel.',
+    return editMessage(chatId, msgId,
+      removed
+        ? '✅ <b>Subscription Cancelled!</b>\n\nYou have been removed from the channel.'
+        : '✅ <b>Subscription Cancelled!</b>\n\n⚠️ Your billing was cancelled, but we couldn\'t remove you from the channel automatically — please contact support if you still have access and shouldn\'t.',
       { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'user_memberships')]]) });
   }
   if (data === 'user_transactions') {
@@ -82,12 +90,26 @@ async function handleCallback(cb) {
   }
   if (data === 'discover_channels' || data === 'discover_channels_page_1') {
     const { showDiscoverChannels } = require('./user/menu');
-    return showDiscoverChannels(chatId, userId, 1, msgId);
+    return showDiscoverChannels(chatId, userId, 1, msgId, 'popular');
   }
   if (data.startsWith('discover_channels_page_')) {
-    const page = parseInt(data.replace('discover_channels_page_', ''));
+    const m = data.match(/^discover_channels_page_(\d+)(?:_(.+))?$/);
+    const page = m ? parseInt(m[1]) : 1;
+    const sort = (m && m[2]) || 'popular';
     const { showDiscoverChannels } = require('./user/menu');
-    return showDiscoverChannels(chatId, userId, page, msgId);
+    return showDiscoverChannels(chatId, userId, page, msgId, sort);
+  }
+  if (data.startsWith('discover_filter_')) {
+    const m = data.match(/^discover_filter_(\d+)_(.+)$/);
+    const page = m ? parseInt(m[1]) : 1;
+    const sort = (m && m[2]) || 'popular';
+    const { showDiscoverFilterMenu } = require('./user/menu');
+    return showDiscoverFilterMenu(chatId, userId, page, msgId, sort);
+  }
+  if (data.startsWith('discover_setsort_')) {
+    const sort = data.replace('discover_setsort_', '');
+    const { showDiscoverChannels } = require('./user/menu');
+    return showDiscoverChannels(chatId, userId, 1, msgId, sort);
   }
   if (data.startsWith('discover_channel_')) {
     const channelId = parseInt(data.replace('discover_channel_', ''));
@@ -331,6 +353,10 @@ async function handleCallback(cb) {
   if (data === 'creator_support') {
     const { showSupport } = require('./user/menu');
     return showSupport(chatId, userId, msgId);
+  }
+  if (data === 'creator_broadcast') {
+    const { showCreatorBroadcastPrompt } = require('./creator/menu');
+    return showCreatorBroadcastPrompt(chatId, userId, msgId);
   }
 
   // ---- PAYMENT CALLBACKS ----

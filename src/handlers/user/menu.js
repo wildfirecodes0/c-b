@@ -154,37 +154,52 @@ async function showFAQ(chatId, userId, msgId) {
   );
 }
 
-async function showDiscoverChannels(chatId, userId, page = 1, msgId) {
+const SORT_OPTIONS = {
+  popular:    { orderBy: 'member_count DESC, c.channel_id DESC', extraWhere: '', label: '🔥 Most Popular' },
+  price_high: { orderBy: 'price IS NULL, price DESC', extraWhere: '', label: '💰 Price: High to Low' },
+  price_low:  { orderBy: 'price IS NULL, price ASC', extraWhere: '', label: '💵 Price: Low to High' },
+  free:       { orderBy: 'member_count DESC, c.channel_id DESC', extraWhere: "AND (p.price IS NULL OR p.price = 0)", label: '🆓 Free Channels' },
+  newest:     { orderBy: 'c.created_at DESC', extraWhere: '', label: '🆕 Newest First' },
+  oldest:     { orderBy: 'c.created_at ASC', extraWhere: '', label: '📜 Oldest First' },
+};
+
+async function showDiscoverChannels(chatId, userId, page = 1, msgId, sort = 'popular') {
   const limit = 10;
   const offset = (page - 1) * limit;
   const now = Date.now();
+  const cfg = SORT_OPTIONS[sort] || SORT_OPTIONS.popular;
 
   const channels = await require('../../db/d1').d1All(
     `SELECT c.channel_id, c.channel_name, c.username, c.type,
             COUNT(s.id) as member_count,
-            p.plan_type, p.price
+            p.plan_type, MIN(p.price) as price
      FROM channels c
      LEFT JOIN subscriptions s ON s.channel_id = c.channel_id AND s.status = 'active'
      LEFT JOIN plans p ON p.channel_id = c.channel_id AND p.is_active = 1
-     WHERE c.is_active = 1 AND c.platform_fee_expires_at > ?
+     WHERE c.is_active = 1 AND c.platform_fee_expires_at > ? ${cfg.extraWhere}
      GROUP BY c.channel_id
-     ORDER BY member_count DESC
+     ORDER BY ${cfg.orderBy}
      LIMIT ? OFFSET ?`,
     [now, limit, offset]
   );
 
   const total = await require('../../db/d1').d1First(
-    'SELECT COUNT(*) as c FROM channels WHERE is_active=1 AND platform_fee_expires_at > ?', [now]
+    `SELECT COUNT(*) as c FROM (
+       SELECT c.channel_id FROM channels c
+       LEFT JOIN plans p ON p.channel_id = c.channel_id AND p.is_active = 1
+       WHERE c.is_active=1 AND c.platform_fee_expires_at > ? ${cfg.extraWhere}
+       GROUP BY c.channel_id
+     )`, [now]
   );
 
   if (!channels.length) {
     return editMessage(chatId, msgId,
-      `<b>🔍 Discover Channels</b>\n━━━━━━━━━━━━━━━━━━\n\nNo active channels found yet.`,
-      { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'main_menu')]]) }
+      `<b>🔍 Discover Channels</b>\n━━━━━━━━━━━━━━━━━━\n\nNo channels found for this filter.`,
+      { reply_markup: inlineKeyboard([[cbButton('⚽️ Filter', `discover_filter_1_${sort}`)], [cbButton('🔙 Back', 'main_menu')]]) }
     );
   }
 
-  let text = `<b>🔍 Discover Channels</b>\n━━━━━━━━━━━━━━━━━━\n`;
+  let text = `<b>🔍 Discover Channels</b>\n━━━━━━━━━━━━━━━━━━\n<i>Sorted by: ${cfg.label}</i>\n`;
   channels.forEach((ch, i) => {
     const num = (page - 1) * limit + i + 1;
     const name = ch.username ? `@${ch.username}` : ch.channel_name;
@@ -203,12 +218,27 @@ async function showDiscoverChannels(chatId, userId, page = 1, msgId) {
   if (row2.length) buttons.push(row2);
 
   const nav = [];
-  if (page > 1) nav.push(cbButton('◀️ Prev', `discover_channels_page_${page-1}`));
-  if ((total?.c || 0) > page * limit) nav.push(cbButton('Next ▶️', `discover_channels_page_${page+1}`));
+  if (page > 1) nav.push(cbButton('◀️ Prev', `discover_channels_page_${page-1}_${sort}`));
+  if ((total?.c || 0) > page * limit) nav.push(cbButton('Next ▶️', `discover_channels_page_${page+1}_${sort}`));
   if (nav.length) buttons.push(nav);
+  buttons.push([cbButton('⚽️ Filter', `discover_filter_${page}_${sort}`)]);
   buttons.push([cbButton('🔙 Back', 'main_menu')]);
 
   return editMessage(chatId, msgId, text, { reply_markup: inlineKeyboard(buttons) });
+}
+
+async function showDiscoverFilterMenu(chatId, userId, page, msgId, sort = 'popular') {
+  const mark = (key) => (key === sort ? ' ✅' : '');
+  return editMessage(chatId, msgId,
+    `<b>⚽️ Filter Channels</b>\n━━━━━━━━━━━━━━━━━━\n\nChoose how you'd like to sort/filter channels:`,
+    { reply_markup: inlineKeyboard([
+      [cbButton(`🔥 Most Popular${mark('popular')}`, `discover_setsort_popular`)],
+      [cbButton(`💰 Price: High to Low${mark('price_high')}`, `discover_setsort_price_high`), cbButton(`💵 Price: Low to High${mark('price_low')}`, `discover_setsort_price_low`)],
+      [cbButton(`🆓 Free Channels${mark('free')}`, `discover_setsort_free`)],
+      [cbButton(`🆕 Newest First${mark('newest')}`, `discover_setsort_newest`), cbButton(`📜 Oldest First${mark('oldest')}`, `discover_setsort_oldest`)],
+      [cbButton('🔙 Back', `discover_channels_page_${page}_${sort}`)],
+    ]) }
+  );
 }
 
 async function showDiscoverChannelDetail(chatId, userId, channelId, msgId) {
@@ -243,4 +273,4 @@ async function showDiscoverChannelDetail(chatId, userId, channelId, msgId) {
   });
 }
 
-module.exports = { showUserMenu, showProfile, showMemberships, showMembershipDetail, showTransactions, showTransactionDetail, downloadTransactionPDF, showDiscoverChannels, showDiscoverChannelDetail, showSupport, showFAQ };
+module.exports = { showUserMenu, showProfile, showMemberships, showMembershipDetail, showTransactions, showTransactionDetail, downloadTransactionPDF, showDiscoverChannels, showDiscoverFilterMenu, showDiscoverChannelDetail, showSupport, showFAQ };

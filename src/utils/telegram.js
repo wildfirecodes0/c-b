@@ -46,8 +46,15 @@ const unbanChatMember = (chatId, userId) =>
   callTG('unbanChatMember', { chat_id: chatId, user_id: userId, only_if_banned: true });
 
 const kickChatMember = async (chatId, userId) => {
-  await banChatMember(chatId, userId);
-  await unbanChatMember(chatId, userId);
+  const banRes = await banChatMember(chatId, userId);
+  // If Telegram rejected the ban (bot not admin, insufficient rights, user already left, etc.)
+  // the member was NOT actually removed — surface that instead of pretending it worked.
+  if (!banRes || banRes.ok !== true) {
+    console.error(`kickChatMember FAILED — chat ${chatId}, user ${userId}:`, banRes?.description || 'unknown error');
+    return { ok: false, description: banRes?.description || 'ban_chat_member failed' };
+  }
+  const unbanRes = await unbanChatMember(chatId, userId);
+  return { ok: true, ban: banRes, unban: unbanRes };
 };
 
 const createInviteLink = (chatId, expireSeconds = 300) =>

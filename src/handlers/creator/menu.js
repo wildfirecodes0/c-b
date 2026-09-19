@@ -12,7 +12,7 @@ async function showCreatorMenu(chatId, userId, msgId = null) {
   const kb = inlineKeyboard([
     [cbButton('📊 Dashboard', 'creator_dashboard'), cbButton('📈 Analytics', 'creator_analytics')],
     [cbButton('📢 Channels', 'creator_channels'), cbButton('👥 Members', 'creator_members')],
-    [cbButton('💰 Payments', 'creator_payments')],
+    [cbButton('💰 Payments', 'creator_payments'), cbButton('📣 Broadcast', 'creator_broadcast')],
     [cbButton('📋 Export Members', 'export_members_csv'), cbButton('⚙️ Settings', 'creator_settings')],
     [cbButton('💎 My Memberships', 'creator_my_memberships')],
     [cbButton('❓ Help & Support', 'creator_support')],
@@ -20,6 +20,23 @@ async function showCreatorMenu(chatId, userId, msgId = null) {
   if (msgId) return editMessage(chatId, msgId, text, { reply_markup: kb });
   const sent = await sendMessage(chatId, text, { reply_markup: kb });
   if (sent.ok) await setUserSession(userId, 'creator_menu', {}, sent.result.message_id);
+}
+
+// Creator's own broadcast — restricted to ONLY this creator's active subscribers
+// (never platform-wide). See session.js step 'creator_broadcast_message' for the send logic,
+// which always scopes the query with `creator_user_id = <this creator's own id>`.
+async function showCreatorBroadcastPrompt(chatId, userId, msgId) {
+  const memberCount = await d1First(
+    "SELECT COUNT(DISTINCT user_id) as c FROM subscriptions WHERE creator_user_id = ? AND status = 'active'",
+    [userId]
+  );
+  await setUserSession(userId, 'creator_broadcast_message', {}, msgId);
+  return editMessage(chatId, msgId,
+    `<b>📣 Broadcast to Your Members</b>\n━━━━━━━━━━━━━━━━━━\n` +
+    `This will be sent to your <b>${memberCount?.c || 0} active member${memberCount?.c === 1 ? '' : 's'}</b> only — across all your channels.\n\n` +
+    `✏️ <b>Send your message now.</b>\n📎 <i>You can also attach a photo, video, voice note, or document.</i>`,
+    { reply_markup: inlineKeyboard([[cbButton('❌ Cancel', 'creator_menu')]]) }
+  );
 }
 
 async function showCreatorDashboard(chatId, userId, msgId) {
@@ -44,4 +61,4 @@ async function showCreatorDashboard(chatId, userId, msgId) {
   );
 }
 
-module.exports = { showCreatorMenu, showCreatorDashboard };
+module.exports = { showCreatorMenu, showCreatorDashboard, showCreatorBroadcastPrompt };

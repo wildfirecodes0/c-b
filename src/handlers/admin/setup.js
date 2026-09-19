@@ -86,11 +86,16 @@ async function showAdminUserDetail(chatId, adminId, targetUserId, msgId) {
 async function banUser(chatId, adminId, targetUserId, msgId) {
   await d1Run('UPDATE users SET is_banned=1, updated_at=? WHERE user_id=?',[Date.now(),targetUserId]);
   const subs = await d1All("SELECT * FROM subscriptions WHERE user_id=? AND status='active'",[targetUserId]);
+  let failedRemovals = 0;
   for (const sub of subs) {
-    try { await kickChatMember(sub.channel_id, targetUserId); } catch(e){}
+    try {
+      const res = await kickChatMember(sub.channel_id, targetUserId);
+      if (!res?.ok) { failedRemovals++; console.error(`banUser: failed to remove ${targetUserId} from channel ${sub.channel_id}:`, res?.description); }
+    } catch(e) { failedRemovals++; console.error('banUser kick error:', e.message); }
     await d1Run("UPDATE subscriptions SET status='cancelled', updated_at=? WHERE id=?",[Date.now(),sub.id]);
   }
-  return editMessage(chatId,msgId,`✅ <b>User Banned!</b>`,{reply_markup:inlineKeyboard([[cbButton('🔙 Back','admin_users')]])});
+  const warn = failedRemovals > 0 ? `\n\n⚠️ Could not remove them from ${failedRemovals} channel(s) — bot may lack admin rights there.` : '';
+  return editMessage(chatId,msgId,`✅ <b>User Banned!</b>${warn}`,{reply_markup:inlineKeyboard([[cbButton('🔙 Back','admin_users')]])});
 }
 
 async function unbanUser(chatId, adminId, targetUserId, msgId) {

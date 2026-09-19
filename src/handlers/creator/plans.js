@@ -37,12 +37,14 @@ async function showAddPlanChannelSelect(chatId, userId, msgId) {
 // ---- MEMBERS ----
 async function showCreatorMembers(chatId, userId, page, msgId) {
   const limit=10, offset=(page-1)*limit;
-  const subs = await d1All(`SELECT s.*, u.full_name, u.username as user_username, c.channel_name, p.plan_type, p.price FROM subscriptions s JOIN users u ON s.user_id=u.user_id JOIN channels c ON s.channel_id=c.channel_id JOIN plans p ON s.plan_id=p.id WHERE s.creator_user_id=? ORDER BY s.created_at DESC LIMIT ? OFFSET ?`, [userId,limit,offset]);
-  const total = await d1First('SELECT COUNT(*) as c FROM subscriptions WHERE creator_user_id=?',[userId]);
-  if (!subs.length) return editMessage(chatId,msgId,`<b>👥 Your Members</b>\n━━━━━━━━━━━━━━━━━━\n\nNo members yet.`,{reply_markup:inlineKeyboard([[cbButton('🔙 Back','creator_menu')]])});
+  // Only currently-active members belong on "Your Members" — once someone is removed/expired/cancelled
+  // they shouldn't keep cluttering this list. (Full history is still visible via Payments/Analytics.)
+  const subs = await d1All(`SELECT s.*, u.full_name, u.username as user_username, c.channel_name, p.plan_type, p.price FROM subscriptions s JOIN users u ON s.user_id=u.user_id JOIN channels c ON s.channel_id=c.channel_id JOIN plans p ON s.plan_id=p.id WHERE s.creator_user_id=? AND s.status='active' ORDER BY s.created_at DESC LIMIT ? OFFSET ?`, [userId,limit,offset]);
+  const total = await d1First("SELECT COUNT(*) as c FROM subscriptions WHERE creator_user_id=? AND status='active'",[userId]);
+  if (!subs.length) return editMessage(chatId,msgId,`<b>👥 Your Members</b>\n━━━━━━━━━━━━━━━━━━\n\nNo active members yet.`,{reply_markup:inlineKeyboard([[cbButton('🔙 Back','creator_menu')]])});
   const _now = Date.now();
   let text=`<b>👥 Your Members</b>\n━━━━━━━━━━━━━━━━━━\n`;
-  subs.forEach((s,i)=>{ const num=(page-1)*10+i+1; let status; if(s.status==='expired'||s.status==='cancelled'){status='❌ Expired';}else if(s.expires_at<=_now){status='❌ Expired';}else if(s.expires_at<=_now+3*24*60*60*1000){status='⏳ Expiring Soon';}else{status='✅ Active';} text+=`\n<b>${num}.</b> <i>${s.full_name}</i> — ${s.channel_name} -> <b>${status}</b>`; });
+  subs.forEach((s,i)=>{ const num=(page-1)*10+i+1; let status; if(s.expires_at<=_now+3*24*60*60*1000){status='⏳ Expiring Soon';}else{status='✅ Active';} text+=`\n<b>${num}.</b> <i>${s.full_name}</i> — ${s.channel_name} -> <b>${status}</b>`; });
   const buttons=[]; const row1=[],row2=[];
   subs.forEach((s,i)=>{ const btn=cbButton(`${(page-1)*10+i+1}`,`member_detail_${s.id}`); if(i<5)row1.push(btn);else row2.push(btn); });
   if(row1.length)buttons.push(row1); if(row2.length)buttons.push(row2);
@@ -86,10 +88,23 @@ async function removeMember(chatId, userId, subId, msgId) {
   const { kickChatMember } = require('../../utils/telegram');
   const sub = await d1First('SELECT * FROM subscriptions WHERE id=? AND creator_user_id=?',[subId,userId]);
   if (!sub) return;
-  try { await kickChatMember(sub.channel_id, sub.user_id); } catch(e){}
+  let removed = true;
+  try {
+    const res = await kickChatMember(sub.channel_id, sub.user_id);
+    removed = !!res?.ok;
+    if (!removed) console.error(`removeMember: failed to remove ${sub.user_id} from channel ${sub.channel_id}:`, res?.description);
+  } catch (e) { removed = false; console.error('removeMember kick error:', e.message); }
+  if (!removed) {
+    // Don't mark cancelled or touch the member count — they're still actually in the
+    // channel. Leaving status='active' means the next expiry cron run (and this button)
+    // will keep retrying until the bot's admin rights are restored.
+    return editMessage(chatId,msgId,
+      `⚠️ <b>Could Not Remove Member!</b>\n\nThe bot couldn't remove them from the Telegram channel (it may have lost admin/ban rights there). Their membership was NOT cancelled — please check the bot's permissions in that channel and try again.`,
+      {reply_markup:inlineKeyboard([[cbButton('🔁 Try Again',`remove_member_${subId}`)],[cbButton('🔙 Back to List','creator_members')]])});
+  }
   await d1Run("UPDATE subscriptions SET status='cancelled', cancelled_at=?, updated_at=? WHERE id=?",[Date.now(),Date.now(),subId]);
   await d1Run('UPDATE channels SET total_members=MAX(0,total_members-1), updated_at=? WHERE channel_id=?',[Date.now(),sub.channel_id]);
-  await sendMessage(sub.user_id,`❌ <b>Membership Removed!</b>\n\nYour access has been removed by the creator.`);
+  try { await sendMessage(sub.user_id,`❌ <b>Membership Removed!</b>\n\nYour access has been removed by the creator.`); } catch (e) { console.error('removeMember user notify error:', e.message); }
   return editMessage(chatId,msgId,`✅ <b>Member Removed!</b>`,{reply_markup:inlineKeyboard([[cbButton('🔙 Back to List','creator_members')]])});
 }
 

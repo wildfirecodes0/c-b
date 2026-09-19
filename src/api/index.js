@@ -146,7 +146,13 @@ router.get('/creator/plans', requireCreator, async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const limit = 10, offset = (page - 1) * limit;
   const [plans, total] = await Promise.all([
-    d1All('SELECT p.*, c.channel_name, c.username as channel_username FROM plans p JOIN channels c ON p.channel_id = c.channel_id WHERE p.creator_user_id = ? ORDER BY p.created_at DESC LIMIT ? OFFSET ?', [req.user.user_id, limit, offset]),
+    d1All(
+      `SELECT p.*, c.channel_name, c.username as channel_username,
+              (SELECT COUNT(*) FROM subscriptions WHERE plan_id = p.id) as total_subscribers,
+              (SELECT COALESCE(SUM(amount),0) FROM transactions WHERE plan_id = p.id AND status='success') as total_revenue
+       FROM plans p JOIN channels c ON p.channel_id = c.channel_id WHERE p.creator_user_id = ? ORDER BY p.created_at DESC LIMIT ? OFFSET ?`,
+      [req.user.user_id, limit, offset]
+    ),
     d1First('SELECT COUNT(*) as c FROM plans WHERE creator_user_id = ?', [req.user.user_id]),
   ]);
   res.json({ page, total: total?.c || 0, plans });

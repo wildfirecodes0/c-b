@@ -1,5 +1,5 @@
 'use strict';
-const { getUserSession, setUserSession, clearUserSession, createPlan, getAdmin, updateBotSettings } = require('../db/index');
+const { getUserSession, setUserSession, clearUserSession, createPlan, getAdmin, updateBotSettings, getUser } = require('../db/index');
 const { d1All, d1First, d1Run } = require('../db/d1');
 const { editMessage, sendMessage, inlineKeyboard, cbButton } = require('../utils/telegram');
 const { encrypt, formatDate } = require('../utils/crypto');
@@ -168,6 +168,35 @@ async function handleSessionInput(msg, session) {
       await new Promise(r => setTimeout(r, 40)); // stay comfortably under Telegram's rate limits
     }
     return editMessage(chatId, msgId, `✅ <b>Broadcast Sent!</b>\n\n📤 <b>Sent:</b> ${sent}\n❌ <b>Failed:</b> ${failed}`, { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'admin_menu')]]) });
+  }
+
+  // Creator's OWN broadcast — hard-scoped to `creator_user_id = userId` (the sender themselves).
+  // A creator can NEVER reach platform-wide users/creators here — only their own active subscribers,
+  // across all of their channels, deduplicated so a member in 2 of their channels gets it once.
+  if (step === 'creator_broadcast_message') {
+    const { sendMessage: tgSend, extractMedia, sendMediaByFileId } = require('../utils/telegram');
+    const { mediaType, fileId } = extractMedia(msg);
+    const messageText = text || msg.caption || null;
+    if (!messageText && !mediaType) {
+      return editMessage(chatId, msgId, `❌ <b>Please send a text message or attach media.</b>`, { reply_markup: inlineKeyboard([[cbButton('🔙 Cancel', 'creator_menu')]]) });
+    }
+    const rows = await d1All(
+      "SELECT DISTINCT user_id FROM subscriptions WHERE creator_user_id = ? AND status = 'active'",
+      [userId]
+    );
+    await clearUserSession(userId);
+    const creator = await getUser(userId);
+    const caption = `📣 <b>Message from ${creator?.full_name || 'the creator'}</b>\n━━━━━━━━━━━━━━━━━━\n${messageText || ''}`;
+    let sent = 0, failed = 0;
+    for (const row of rows) {
+      try {
+        if (mediaType) await sendMediaByFileId(row.user_id, mediaType, fileId, caption);
+        else await tgSend(row.user_id, caption);
+        sent++;
+      } catch { failed++; }
+      await new Promise(r => setTimeout(r, 40)); // stay comfortably under Telegram's rate limits
+    }
+    return editMessage(chatId, msgId, `✅ <b>Broadcast Sent!</b>\n\n📤 <b>Sent to:</b> ${sent} of your members\n❌ <b>Failed:</b> ${failed}`, { reply_markup: inlineKeyboard([[cbButton('🔙 Back', 'creator_menu')]]) });
   }
 
   if (step === 'admin_change_fee') {
