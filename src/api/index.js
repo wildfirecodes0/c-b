@@ -134,6 +134,27 @@ router.get('/discover/channels', async (req, res) => {
   res.json({ page, total: total?.c || 0, channels });
 });
 
+// Mirrors: user/menu.js -> showDiscoverChannelDetail (channel info + plans + bot join link)
+router.get('/discover/channels/:channelId', async (req, res) => {
+  const channelId = parseInt(req.params.channelId);
+  if (!channelId) return res.status(400).json({ error: 'Invalid channel id.' });
+  const ch = await d1First(
+    `SELECT c.channel_id, c.channel_name, c.username, c.type, c.category, c.description, c.created_at,
+            COUNT(s.id) as member_count
+     FROM channels c
+     LEFT JOIN subscriptions s ON s.channel_id = c.channel_id AND s.status = 'active'
+     WHERE c.channel_id = ? AND c.is_active = 1
+     GROUP BY c.channel_id`, [channelId]
+  );
+  if (!ch) return res.status(404).json({ error: 'Channel not found.' });
+  const plans = await d1All(
+    'SELECT id, plan_name, plan_type, price, trial_days FROM plans WHERE channel_id = ? AND is_active = 1 ORDER BY price ASC', [channelId]
+  );
+  const botUsername = (process.env.BOT_USERNAME || '').replace(/^@/, '');
+  const join_link = botUsername ? `https://t.me/${botUsername}?start=join_${channelId}` : null;
+  res.json({ channel: ch, plans, join_link });
+});
+
 // ============================================
 // CREATOR — mirrors src/handlers/creator/*.js
 // ============================================
