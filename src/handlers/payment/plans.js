@@ -220,12 +220,7 @@ async function initTrxPayment(chatId, userId, planId, msgId) {
   const applied = session?.current_step === 'coupon_applied' && session.data?.planId === planId ? session.data : null;
   const finalAmount = applied ? Math.max(0, plan.price - applied.discountAmount) : plan.price;
 
-  let trxRate;
-  try { trxRate = await getTRXRate(); } catch (e) {
-    console.error('getTRXRate error:', e.message);
-    return editMessage(chatId, msgId, `❌ <b>TRX payment is unavailable right now.</b>\n\n<i>Could not fetch the live TRX price. Please try again in a few minutes or pay via Razorpay.</i>`,
-      { reply_markup: inlineKeyboard([[cbButton('🔙 Back', `select_plan_${planId}`)]]) });
-  }
+  const trxRate = await getTRXRate();
   const amountTrx = (finalAmount / 100 / trxRate).toFixed(2);
   const sessionId = generateToken(16);
   const expiresAt = Date.now() + 30 * 60 * 1000; // 30 min window
@@ -292,7 +287,7 @@ async function startTrial(chatId, userId, channelId, msgId = null) {
   const now = Date.now();
   const expiresAt = now + trialPlan.trial_days * 24 * 60 * 60 * 1000;
 
-  const { markTrialUsed, createSubscription, getUser, syncChannelMemberCount } = require('../../db/index');
+  const { markTrialUsed, createSubscription, getUser } = require('../../db/index');
   const { d1Run } = require('../../db/d1');
   await markTrialUsed(userId, channelId, expiresAt);
   await createSubscription({
@@ -303,7 +298,7 @@ async function startTrial(chatId, userId, channelId, msgId = null) {
     expiresAt,
     graceUntil: expiresAt + 24 * 60 * 60 * 1000,
   });
-  await syncChannelMemberCount(channelId);
+  await d1Run('UPDATE channels SET total_members = total_members + 1, updated_at = ? WHERE channel_id = ?', [now, channelId]);
 
   const inviteResult = await createInviteLink(channelId, 300);
   const inviteLink = inviteResult.result?.invite_link;

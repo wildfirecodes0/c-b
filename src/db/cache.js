@@ -31,10 +31,6 @@ function del(key) {
   store.delete(key);
 }
 
-function delPrefix(prefix) {
-  for (const k of store.keys()) if (k.startsWith(prefix)) store.delete(k);
-}
-
 // Rate limiting — stored in cache
 const rateMap = new Map();
 function checkRate(userId, action, max = 10, windowMs = 60000) {
@@ -50,4 +46,4 @@ function checkRate(userId, action, max = 10, windowMs = 60000) {
   return true;
 }
 
-module.exports = { get, set, del, delPrefix, TTL, checkRate };
+module.exports = { get, set, del, TTL, checkRate };

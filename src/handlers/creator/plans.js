@@ -76,7 +76,6 @@ async function extendMember(chatId, userId, subId, msgId) {
   if (!sub) return;
   const newExpiry = sub.expires_at + 30*24*60*60*1000;
   await d1Run('UPDATE subscriptions SET expires_at=?, grace_until=?, status=?, updated_at=? WHERE id=?',[newExpiry, newExpiry+24*60*60*1000, 'active', Date.now(), subId]);
-  await require('../../db/index').syncChannelMemberCount(sub.channel_id);
   try {
     await sendMessage(sub.user_id,
       `🎉 <b>Membership Extended!</b>\n━━━━━━━━━━━━━━━━━━\n📢 <b>Channel:</b> ${sub.channel_name}\n💥 <b>New Expiry:</b> ${formatDate(newExpiry)}\n\n<i>Your creator has extended your membership by 30 days — no payment needed!</i>`
@@ -104,7 +103,7 @@ async function removeMember(chatId, userId, subId, msgId) {
       {reply_markup:inlineKeyboard([[cbButton('🔁 Try Again',`remove_member_${subId}`)],[cbButton('🔙 Back to List','creator_members')]])});
   }
   await d1Run("UPDATE subscriptions SET status='cancelled', cancelled_at=?, updated_at=? WHERE id=?",[Date.now(),Date.now(),subId]);
-  await require('../../db/index').syncChannelMemberCount(sub.channel_id);
+  await d1Run('UPDATE channels SET total_members=MAX(0,total_members-1), updated_at=? WHERE channel_id=?',[Date.now(),sub.channel_id]);
   try { await sendMessage(sub.user_id,`❌ <b>Membership Removed!</b>\n\nYour access has been removed by the creator.`); } catch (e) { console.error('removeMember user notify error:', e.message); }
   return editMessage(chatId,msgId,`✅ <b>Member Removed!</b>`,{reply_markup:inlineKeyboard([[cbButton('🔙 Back to List','creator_members')]])});
 }

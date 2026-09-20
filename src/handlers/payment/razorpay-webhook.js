@@ -6,9 +6,8 @@ const {
   createSubscription, createTransaction,
   isPaymentIdUsed, markPaymentIdUsed,
   getChannel, getPlan, getUser,
-  getAdmin, getCreator, syncChannelMemberCount,
+  handleReferralReward, getAdmin, getCreator,
 } = require('../../db/index');
-const cache = require('../../db/cache');
 const { sendMessage, createInviteLink, inlineKeyboard, cbButton, deleteMessage } = require('../../utils/telegram');
 const { notifyAdmin } = require('../user/start');
 
@@ -100,16 +99,9 @@ function runFraudChecks(payment, session) {
   return { valid: true };
 }
 
-// Platform-fee sessions carry a FEE_ prefix (set in creator/onboarding.js). This used to be guessed
-// from "payer == creator", which wrongly treated a creator subscribing to their OWN channel as a
-// platform-fee payment — so the subscription was never extended.
-function isPlatformFeeSession(session) {
-  return String(session.session_id || '').startsWith('FEE_');
-}
-
 async function processSuccessfulPayment(session, paymentData, method) {
   try {
-    if (isPlatformFeeSession(session)) {
+    if (session.user_id === session.creator_user_id) {
       return completePlatformFeePayment(session, method);
     }
 
@@ -134,7 +126,6 @@ async function processSuccessfulPayment(session, paymentData, method) {
     );
 
     let expiresAt;
-    const isRenewal = !!existingSub;
     const planDuration =
       plan.plan_type === 'monthly' ? 30 * 24 * 60 * 60 * 1000 :
       plan.plan_type === 'yearly'  ? 365 * 24 * 60 * 60 * 1000 :
@@ -145,7 +136,7 @@ async function processSuccessfulPayment(session, paymentData, method) {
       const baseTime = Math.max(existingSub.expires_at, now);
       expiresAt = baseTime + planDuration;
       await d1Run(
-        "UPDATE subscriptions SET status='active', is_trial=0, plan_id=?, expires_at=?, grace_until=?, reminder_3day_sent=0, reminder_1day_sent=0, cancelled_at=NULL, updated_at=? WHERE id=?",
+        "UPDATE subscriptions SET status='active', plan_id=?, expires_at=?, grace_until=?, reminder_3day_sent=0, reminder_1day_sent=0, updated_at=? WHERE id=?",
         [session.plan_id, expiresAt, expiresAt + 24 * 60 * 60 * 1000, now, existingSub.id]
       );
     } else {
@@ -175,40 +166,36 @@ async function processSuccessfulPayment(session, paymentData, method) {
       commission,
     });
 
-    // Re-count from real subscriptions (a renewal of an active member must NOT add +1).
-    await syncChannelMemberCount(session.channel_id);
+    await d1Run(
+      'UPDATE channels SET total_members = total_members + 1, updated_at = ? WHERE channel_id = ?',
+      [now, session.channel_id]
+    );
 
     const inviteResult = await createInviteLink(session.channel_id, 300);
     const inviteLink = inviteResult.result?.invite_link;
 
-    // 1) Tell the subscriber (join link, or a "contact support" note if the link could not be made)
-    if (inviteLink) {
-      await sendMessage(session.user_id,
-        `✅ <b>Payment Verified!</b>\n━━━━━━━━━━━━━━━━━━\n` +
-        (isRenewal ? `🔄 Your subscription to <b>${channel.channel_name}</b> has been renewed!\n\n` : `🎉 Welcome to <b>${channel.channel_name}</b>!\n\n`) +
-        `🔗 <b>Your Join Link:</b>\n<code>${inviteLink}</code>\n\n` +
-        `⚠️ <i>This link will expire in 5 minutes and can only be used once!</i>\n\n` +
-        `📅 <b>Valid Till:</b> ${formatDate(expiresAt)}`,
-        { reply_markup: inlineKeyboard([[{ text: '🔗 Join Now', url: inviteLink }], [cbButton('🏠 Main Menu', 'main_menu')]]) }
-      );
-    } else {
-      console.error('Invite link creation failed for channel', session.channel_id, JSON.stringify(inviteResult || {}));
-      await sendMessage(session.user_id,
-        `✅ <b>Payment Verified!</b>\n\n📅 <b>Valid Till:</b> ${formatDate(expiresAt)}\n\nContact support for your join link.`);
+    if (!inviteLink) {
+      // Send welcome message if creator has set one
+    try {
+      const { sendWelcomeMessage } = require('../creator/welcome');
+      await sendWelcomeMessage(channel, user, expiresAt);
+    } catch (e) { console.error('Welcome message error:', e.message); }
+
+    await sendMessage(session.user_id, '✅ <b>Payment Verified!</b>\n\nContact support for your join link.');
+      return;
     }
 
-    // 2) Creator's custom welcome message — for NEW subscribers only (a renewal is not a new join).
-    //    Previously this was only sent when the invite link FAILED, so paid members never got it.
-    if (!isRenewal) {
-      try {
-        const { sendWelcomeMessage } = require('../creator/welcome');
-        await sendWelcomeMessage(channel, user, expiresAt);
-      } catch (e) { console.error('Welcome message error:', e.message); }
-    }
+    await sendMessage(session.user_id,
+      `✅ <b>Payment Verified!</b>\n━━━━━━━━━━━━━━━━━━\n` +
+      `🎉 Welcome to <b>${channel.channel_name}</b>!\n\n` +
+      `🔗 <b>Your Join Link:</b>\n<code>${inviteLink}</code>\n\n` +
+      `⚠️ <i>This link will expire in 5 minutes and can only be used once!</i>\n\n` +
+      `📅 <b>Valid Till:</b> ${formatDate(expiresAt)}`,
+      { reply_markup: inlineKeyboard([[{ text: '🔗 Join Now', url: inviteLink }], [cbButton('🏠 Main Menu', 'main_menu')]]) }
+    );
 
-    // 3) Creator + admin are always notified, even if the invite link failed (they used to be skipped).
     await sendMessage(session.creator_user_id,
-      `${isRenewal ? '🔄 <b>Subscription Renewed!</b>' : '💰 <b>New Payment Received!</b>'}\n━━━━━━━━━━━━━━━━━━\n` +
+      `💰 <b>New Payment Received!</b>\n━━━━━━━━━━━━━━━━━━\n` +
       `👤 <b>User:</b> ${user.full_name}\n🆔 <code>${user.user_id}</code>\n` +
       `📢 <b>Channel:</b> ${channel.channel_name}\n💎 <b>Plan:</b> ${plan.plan_type}\n` +
       `💰 <b>Amount:</b> ₹${session.amount / 100}\n💳 <b>Method:</b> ${method}\n` +
@@ -222,6 +209,22 @@ async function processSuccessfulPayment(session, paymentData, method) {
         `💰 ₹${session.amount / 100}\n💳 ${method}\n🆔 <code>${txnId}</code>`
       );
     }
+
+    // Referral reward - fetch fresh from DB to bypass cache
+    const freshUser = await d1First('SELECT referred_by FROM users WHERE user_id = ?', [session.user_id]);
+    if (freshUser?.referred_by) {
+      const rewarded = await handleReferralReward(freshUser.referred_by, session.user_id);
+      if (rewarded) {
+        // Fetch referrer fresh after reward update
+        const referrer = await d1First('SELECT full_name, unclaimed_free_days FROM users WHERE user_id = ?', [freshUser.referred_by]);
+        const unclaimed = referrer?.unclaimed_free_days || 1;
+        await sendMessage(freshUser.referred_by,
+          `🎁 <b>Referral Reward!</b>\n\nYour friend <b>${user.full_name}</b> just subscribed! You've banked <b>1 more free day</b> 🎉\n\n` +
+          `💰 <b>Unclaimed Balance:</b> ${unclaimed} free day${unclaimed === 1 ? '' : 's'}\n\n` +
+          `💡 <i>If you're a creator, claim this anytime from your channel's "Renew Platform Fee" screen to extend your membership for free!</i>`
+        );
+      }
+    }
   } catch (err) {
     console.error('processSuccessfulPayment error:', err.message);
   }
@@ -230,7 +233,7 @@ async function processSuccessfulPayment(session, paymentData, method) {
 async function completePlatformFeePayment(session, method) {
   try {
     const now = Date.now();
-    const FEE_PERIOD_MS = 30 * 24 * 60 * 60 * 1000;
+    const feeExpiresAt = now + 30 * 24 * 60 * 60 * 1000;
 
     // Delete the old "Complete Platform Fee Payment" prompt.
     if (session.message_id) {
@@ -240,12 +243,8 @@ async function completePlatformFeePayment(session, method) {
     const { updateUser, getUser, getChannel, getPlan, createCreator, createPlan } = require('../../db/index');
 
     // Check if this is a renewal (channel already exists in DB)
-    const channelBefore = await d1First('SELECT channel_id, platform_fee_paid, is_suspended, platform_fee_expires_at FROM channels WHERE channel_id=?', [session.channel_id]);
+    const channelBefore = await d1First('SELECT channel_id, platform_fee_paid, is_suspended FROM channels WHERE channel_id=?', [session.channel_id]);
     const isRenewal = !!channelBefore;
-
-    // Renewal STACKS on the remaining time (10 days left + 30 = 40 days); if already expired, start from now.
-    const feeBase = (isRenewal && channelBefore.platform_fee_expires_at > now) ? channelBefore.platform_fee_expires_at : now;
-    const feeExpiresAt = feeBase + FEE_PERIOD_MS;
 
     if (isRenewal) {
       // Just renew fee — channel/plan already exist
@@ -286,7 +285,6 @@ async function completePlatformFeePayment(session, method) {
       );
     }
 
-    cache.del(`channel:${session.channel_id}`); // otherwise the old expiry keeps showing until cache expires
     await d1Run('UPDATE creators SET onboarding_complete=1, updated_at=? WHERE user_id=?', [now, session.creator_user_id]);
     await updateUser(session.creator_user_id, { role: 'creator' });
 
@@ -309,6 +307,23 @@ async function completePlatformFeePayment(session, method) {
         commission: 0,
       });
     } catch (e) { console.error('Fee transaction record error:', e.message); }
+
+    // Referral reward — platform fee payment counts as conversion
+    try {
+      const freshCreator = await d1First('SELECT referred_by FROM users WHERE user_id = ?', [session.creator_user_id]);
+      if (freshCreator?.referred_by) {
+        const rewarded = await handleReferralReward(freshCreator.referred_by, session.creator_user_id);
+        if (rewarded) {
+          const referrer = await d1First('SELECT unclaimed_free_days FROM users WHERE user_id = ?', [freshCreator.referred_by]);
+          const unclaimed = referrer?.unclaimed_free_days || 1;
+          await sendMessage(freshCreator.referred_by,
+            `🎁 <b>Referral Reward!</b>\n\nYour friend just paid the platform fee! You've banked <b>1 more free day</b> 🎉\n\n` +
+            `💰 <b>Unclaimed Balance:</b> ${unclaimed} free day${unclaimed === 1 ? '' : 's'}\n\n` +
+            `💡 <i>Go to your channel's "Renew Platform Fee" screen → "Claim FREE Access" to use them!</i>`
+          );
+        }
+      }
+    } catch (e) { console.error('Fee referral reward error:', e.message); }
 
     const [user, channel, plan] = await Promise.all([
       getUser(session.creator_user_id),

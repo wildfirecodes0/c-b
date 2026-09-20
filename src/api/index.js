@@ -56,6 +56,8 @@ router.get('/me', async (req, res) => {
     full_name: user.full_name,
     joined_at: user.created_at,
     active_plans: activeSubs?.c || 0,
+    free_days_earned: user.free_days_earned || 0,
+    referral_code: user.referral_code,
     is_creator: req.isCreator,
     is_admin: req.isAdmin,
   });
@@ -81,13 +83,55 @@ router.get('/transactions', async (req, res) => {
   const limit = 10, offset = (page - 1) * limit;
   const [txns, total] = await Promise.all([
     d1All(
-      `SELECT t.*, c.channel_name FROM transactions t JOIN channels c ON t.channel_id = c.channel_id
+      `SELECT t.*, COALESCE(c.channel_name,'Platform Fee') as channel_name, COALESCE(p.plan_type,'platform_fee') as plan_type FROM transactions t
+       LEFT JOIN channels c ON t.channel_id = c.channel_id LEFT JOIN plans p ON t.plan_id = p.id
        WHERE t.user_id = ? ORDER BY t.created_at DESC LIMIT ? OFFSET ?`,
       [req.user.user_id, limit, offset]
     ),
     d1First('SELECT COUNT(*) as c FROM transactions WHERE user_id = ?', [req.user.user_id]),
   ]);
   res.json({ page, total: total?.c || 0, transactions: txns });
+});
+
+// Mirrors: user/menu.js -> showDiscoverChannels (same filters + sort options as the bot)
+const DISCOVER_SORT = {
+  popular:    { orderBy: 'member_count DESC, c.channel_id DESC', extraWhere: '' },
+  price_high: { orderBy: 'price IS NULL, price DESC', extraWhere: '' },
+  price_low:  { orderBy: 'price IS NULL, price ASC', extraWhere: '' },
+  free:       { orderBy: 'member_count DESC, c.channel_id DESC', extraWhere: 'AND (p.price IS NULL OR p.price = 0)' },
+  newest:     { orderBy: 'c.created_at DESC', extraWhere: '' },
+  oldest:     { orderBy: 'c.created_at ASC', extraWhere: '' },
+};
+
+router.get('/discover/channels', async (req, res) => {
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const limit = 10, offset = (page - 1) * limit;
+  const now = Date.now();
+  const cfg = DISCOVER_SORT[req.query.sort] || DISCOVER_SORT.popular;
+  const [channels, total] = await Promise.all([
+    d1All(
+      `SELECT c.channel_id, c.channel_name, c.username, c.type, c.category,
+              COUNT(s.id) as member_count,
+              p.plan_type, MIN(p.price) as price
+       FROM channels c
+       LEFT JOIN subscriptions s ON s.channel_id = c.channel_id AND s.status = 'active'
+       LEFT JOIN plans p ON p.channel_id = c.channel_id AND p.is_active = 1
+       WHERE c.is_active = 1 AND c.platform_fee_expires_at > ? ${cfg.extraWhere}
+       GROUP BY c.channel_id
+       ORDER BY ${cfg.orderBy}
+       LIMIT ? OFFSET ?`,
+      [now, limit, offset]
+    ),
+    d1First(
+      `SELECT COUNT(*) as c FROM (
+         SELECT c.channel_id FROM channels c
+         LEFT JOIN plans p ON p.channel_id = c.channel_id AND p.is_active = 1
+         WHERE c.is_active = 1 AND c.platform_fee_expires_at > ? ${cfg.extraWhere}
+         GROUP BY c.channel_id
+       )`, [now]
+    ),
+  ]);
+  res.json({ page, total: total?.c || 0, channels });
 });
 
 // ============================================
@@ -174,9 +218,9 @@ router.get('/creator/payments', requireCreator, async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const limit = 10, offset = (page - 1) * limit;
   const [txns, total] = await Promise.all([
-    d1All(`SELECT t.*, u.full_name, c.channel_name, p.plan_type FROM transactions t JOIN users u ON t.user_id=u.user_id JOIN channels c ON t.channel_id=c.channel_id JOIN plans p ON t.plan_id=p.id
+    d1All(`SELECT t.*, u.full_name, COALESCE(c.channel_name,'Platform Fee') as channel_name, COALESCE(p.plan_type,'platform_fee') as plan_type FROM transactions t JOIN users u ON t.user_id=u.user_id LEFT JOIN channels c ON t.channel_id=c.channel_id LEFT JOIN plans p ON t.plan_id=p.id
            WHERE t.creator_user_id=? ORDER BY t.created_at DESC LIMIT ? OFFSET ?`, [req.user.user_id, limit, offset]),
-    d1First('SELECT COUNT(*) as c FROM transactions WHERE creator_user_id=? AND plan_id != 0', [req.user.user_id]),
+    d1First('SELECT COUNT(*) as c FROM transactions WHERE creator_user_id=?', [req.user.user_id]),
   ]);
   res.json({ page, total: total?.c || 0, payments: txns });
 });
@@ -337,18 +381,16 @@ router.put('/admin/users/:userId/ban', requireAdmin, async (req, res) => {
   const userId = parseInt(req.params.userId);
   const target = await getUser(userId);
   if (!target) return res.status(404).json({ error: 'User not found.' });
-  const { banUserAction } = require('../handlers/admin/actions');
-  const { failedRemovals, notified } = await banUserAction(userId, (req.body && req.body.reason) || null);
-  res.json({ ok: true, notified, failed_removals: failedRemovals });
+  await updateUser(userId, { is_banned: 1, ban_reason: (req.body && req.body.reason) || null });
+  res.json({ ok: true });
 });
 
 router.put('/admin/users/:userId/unban', requireAdmin, async (req, res) => {
   const userId = parseInt(req.params.userId);
   const target = await getUser(userId);
   if (!target) return res.status(404).json({ error: 'User not found.' });
-  const { unbanUserAction } = require('../handlers/admin/actions');
-  const { notified } = await unbanUserAction(userId);
-  res.json({ ok: true, notified });
+  await updateUser(userId, { is_banned: 0, ban_reason: null });
+  res.json({ ok: true });
 });
 
 router.put('/admin/creators/:userId/verify', requireAdmin, async (req, res) => {
@@ -363,18 +405,16 @@ router.put('/admin/creators/:userId/suspend', requireAdmin, async (req, res) => 
   const userId = parseInt(req.params.userId);
   const creator = await getCreator(userId);
   if (!creator) return res.status(404).json({ error: 'Creator not found.' });
-  const { suspendCreatorAction } = require('../handlers/admin/actions');
-  const { notified } = await suspendCreatorAction(userId, (req.body && req.body.reason) || null);
-  res.json({ ok: true, notified });
+  await updateCreator(userId, { is_suspended: 1, suspend_reason: (req.body && req.body.reason) || null });
+  res.json({ ok: true });
 });
 
 router.put('/admin/creators/:userId/unsuspend', requireAdmin, async (req, res) => {
   const userId = parseInt(req.params.userId);
   const creator = await getCreator(userId);
   if (!creator) return res.status(404).json({ error: 'Creator not found.' });
-  const { activateCreatorAction } = require('../handlers/admin/actions');
-  const { notified } = await activateCreatorAction(userId);
-  res.json({ ok: true, notified });
+  await updateCreator(userId, { is_suspended: 0, suspend_reason: null });
+  res.json({ ok: true });
 });
 
 module.exports = router;

@@ -72,29 +72,35 @@ async function showAdminUsers(chatId, userId, page, msgId) {
 async function showAdminUserDetail(chatId, adminId, targetUserId, msgId) {
   const user = await d1First('SELECT * FROM users WHERE user_id=?',[targetUserId]);
   if (!user) return;
-  const [activeSubs,totalSpent] = await Promise.all([
+  const [activeSubs,totalSpent,referrals] = await Promise.all([
     d1First("SELECT COUNT(*) as c FROM subscriptions WHERE user_id=? AND status='active'",[targetUserId]),
     d1First("SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE user_id=? AND status='success'",[targetUserId]),
+    d1First('SELECT COUNT(*) as c FROM referrals WHERE referrer_user_id=?',[targetUserId]),
   ]);
   return editMessage(chatId,msgId,
-    `<b>👥 User Details</b>\n━━━━━━━━━━━━━━━━━━\n👤 <b>Name:</b> ${user.full_name}\n🆔 <b>User ID:</b> <code>${user.user_id}</code>\n🔗 <b>Username:</b> ${user.username?'@'+user.username:'N/A'}\n🎭 <b>Role:</b> ${user.role}\n📅 <b>Joined:</b> ${formatDate(user.created_at)}\n💎 <b>Active Subs:</b> ${activeSubs?.c||0}\n💰 <b>Total Spent:</b> ₹${(totalSpent?.t||0)/100}\n🌐 <b>Status:</b> ${user.is_banned?'❌ Banned':'✅ Active'}`,
+    `<b>👥 User Details</b>\n━━━━━━━━━━━━━━━━━━\n👤 <b>Name:</b> ${user.full_name}\n🆔 <b>User ID:</b> <code>${user.user_id}</code>\n🔗 <b>Username:</b> ${user.username?'@'+user.username:'N/A'}\n🎭 <b>Role:</b> ${user.role}\n📅 <b>Joined:</b> ${formatDate(user.created_at)}\n💎 <b>Active Subs:</b> ${activeSubs?.c||0}\n💰 <b>Total Spent:</b> ₹${(totalSpent?.t||0)/100}\n🎁 <b>Referrals:</b> ${referrals?.c||0}\n🌐 <b>Status:</b> ${user.is_banned?'❌ Banned':'✅ Active'}`,
     {reply_markup:inlineKeyboard([[cbButton(user.is_banned?'✅ Unban':'🚫 Ban',`admin_${user.is_banned?'unban':'ban'}_user_${targetUserId}`)],[cbButton('🔙 Back to List','admin_users')]])}
   );
 }
 
 async function banUser(chatId, adminId, targetUserId, msgId) {
-  const { banUserAction } = require('./actions');
-  const { failedRemovals, notified } = await banUserAction(targetUserId);
+  await d1Run('UPDATE users SET is_banned=1, updated_at=? WHERE user_id=?',[Date.now(),targetUserId]);
+  const subs = await d1All("SELECT * FROM subscriptions WHERE user_id=? AND status='active'",[targetUserId]);
+  let failedRemovals = 0;
+  for (const sub of subs) {
+    try {
+      const res = await kickChatMember(sub.channel_id, targetUserId);
+      if (!res?.ok) { failedRemovals++; console.error(`banUser: failed to remove ${targetUserId} from channel ${sub.channel_id}:`, res?.description); }
+    } catch(e) { failedRemovals++; console.error('banUser kick error:', e.message); }
+    await d1Run("UPDATE subscriptions SET status='cancelled', updated_at=? WHERE id=?",[Date.now(),sub.id]);
+  }
   const warn = failedRemovals > 0 ? `\n\n⚠️ Could not remove them from ${failedRemovals} channel(s) — bot may lack admin rights there.` : '';
-  const note = notified ? `\n📨 User has been notified.` : `\n⚠️ Could not notify the user (they may have blocked the bot).`;
-  return editMessage(chatId,msgId,`✅ <b>User Banned!</b>${note}${warn}`,{reply_markup:inlineKeyboard([[cbButton('🔙 Back','admin_users')]])});
+  return editMessage(chatId,msgId,`✅ <b>User Banned!</b>${warn}`,{reply_markup:inlineKeyboard([[cbButton('🔙 Back','admin_users')]])});
 }
 
 async function unbanUser(chatId, adminId, targetUserId, msgId) {
-  const { unbanUserAction } = require('./actions');
-  const { notified } = await unbanUserAction(targetUserId);
-  const note = notified ? `\n📨 User has been notified.` : `\n⚠️ Could not notify the user (they may have blocked the bot).`;
-  return editMessage(chatId,msgId,`✅ <b>User Unbanned!</b>${note}`,{reply_markup:inlineKeyboard([[cbButton('🔙 Back','admin_users')]])});
+  await d1Run('UPDATE users SET is_banned=0, updated_at=? WHERE user_id=?',[Date.now(),targetUserId]);
+  return editMessage(chatId,msgId,`✅ <b>User Unbanned!</b>`,{reply_markup:inlineKeyboard([[cbButton('🔙 Back','admin_users')]])});
 }
 
 async function showAdminChannels(chatId, userId, page, msgId) {

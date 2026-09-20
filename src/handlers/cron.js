@@ -5,7 +5,7 @@ const { sendMessage, kickChatMember, inlineKeyboard, cbButton } = require('../ut
 const { formatDate } = require('../utils/crypto');
 const { pollTrxPayments } = require('./payment/trx');
 const { pollRazorpayPayments } = require('./payment/razorpay-webhook');
-const { getAdmin, syncChannelMemberCount, syncAllMemberCounts } = require('../db/index');
+const { getAdmin } = require('../db/index');
 
 function startCronJobs() {
   // Drip content — run every hour
@@ -14,7 +14,6 @@ function startCronJobs() {
       const { sendDripMessages } = require('./creator/welcome');
       await sendDripMessages();
     } catch (e) { console.error('Drip cron error:', e.message); }
-    try { await syncAllMemberCounts(); } catch (e) { console.error('Member count sync error:', e.message); }
   });
 
   cron.schedule('* * * * *', async () => {
@@ -108,7 +107,7 @@ async function checkExpiringSubscriptions() {
     }
 
     await d1Run("UPDATE subscriptions SET status = 'expired', updated_at = ? WHERE id = ?", [now, sub.id]);
-    await syncChannelMemberCount(sub.channel_id);
+    await d1Run('UPDATE channels SET total_members = MAX(0, total_members - 1), updated_at = ? WHERE channel_id = ?', [now, sub.channel_id]);
     try {
       await sendMessage(sub.user_id,
         `❌ <b>Subscription Expired!</b>\n━━━━━━━━━━━━━━━━━━\n📢 <b>Channel:</b> ${sub.channel_name}\n\nYour access has been removed. Renew to rejoin!`,

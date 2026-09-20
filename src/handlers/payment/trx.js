@@ -80,7 +80,7 @@ async function validateTrxTransaction(txn, session) {
     const receivedSun = parseInt(value.amount || 0);
     const receivedTrx = receivedSun / SUN_PER_TRX;
     const expectedTrx = parseFloat(session.trx_amount_usdt); // stored as TRX amount
-    if (Math.abs(receivedTrx - expectedTrx) > 0.05) return false; // 0.05 TRX tolerance (amounts are small, ~1-2 TRX)
+    if (Math.abs(receivedTrx - expectedTrx) > 0.5) return false; // 0.5 TRX tolerance
 
     // ✅ Not already used
     if (await isTrxHashUsed(txnHash)) return false;
